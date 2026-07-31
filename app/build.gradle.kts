@@ -381,6 +381,7 @@ dependencies {
     implementation(libs.tinypinyin)
     ksp(libs.room.compiler)
     implementation(libs.room.ktx)
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
     implementation(libs.apache.lang3)
 

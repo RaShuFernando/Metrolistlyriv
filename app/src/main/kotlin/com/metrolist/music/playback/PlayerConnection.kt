@@ -29,12 +29,15 @@ import com.metrolist.music.extensions.getCurrentQueueIndex
 import com.metrolist.music.extensions.getQueueWindows
 import com.metrolist.music.extensions.metadata
 import com.metrolist.music.extensions.togglePlayPause
+import com.metrolist.music.lyrics.vault.LyricsSyncManager
+import com.metrolist.music.lyrics.vault.VaultMetadata
 import com.metrolist.music.playback.MusicService.MusicBinder
 import com.metrolist.music.playback.queues.Queue
 import com.metrolist.music.utils.dataStore
 import com.metrolist.music.utils.get
 import com.metrolist.music.utils.reportException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -217,6 +220,50 @@ class PlayerConnection(
         }
 
         Timber.tag(TAG).d("PlayerConnection flow observer registered; playerReady=${playerReadinessFlow.value}")
+
+        scope.launch {
+            mediaMetadata.collect {
+                checkAndTriggerLyricsSync()
+            }
+        }
+    }
+
+    private var lastSyncedVideoId: String? = null
+
+    private fun checkAndTriggerLyricsSync() {
+        val metadata = mediaMetadata.value ?: return
+        if (metadata.id == lastSyncedVideoId) return
+
+        val durationSeconds = if (metadata.duration > 0) {
+            metadata.duration
+        } else {
+            val playerDuration = getPlayerOrNull()?.duration ?: -1L
+            if (playerDuration > 0) (playerDuration / 1000).toInt() else -1
+        }
+
+        if (durationSeconds <= 0) return
+
+        lastSyncedVideoId = metadata.id
+
+        val vaultMetadata = VaultMetadata(
+            videoId = metadata.id,
+            title = metadata.title,
+            artist = metadata.artists.joinToString(", ") { it.name },
+            album = metadata.album?.title ?: "",
+            durationSeconds = durationSeconds,
+            albumArtUrl = metadata.thumbnailUrl ?: "",
+            composer = "",
+            mediaId = metadata.id,
+            releaseYear = null,
+            trackNumber = null,
+            artistBrowseId = metadata.artists.firstOrNull()?.id,
+            albumBrowseId = metadata.album?.id,
+            isExplicit = metadata.explicit
+        )
+
+        scope.launch(Dispatchers.IO) {
+            LyricsSyncManager.syncLyrics(context.applicationContext, vaultMetadata)
+        }
     }
 
     private fun updateAttachedPlayer(newPlayer: Player) {
@@ -580,6 +627,9 @@ class PlayerConnection(
     override fun onPlaybackStateChanged(state: Int) {
         playbackState.value = state
         error.value = player.playerError
+        if (state == Player.STATE_READY || state == Player.STATE_BUFFERING) {
+            checkAndTriggerLyricsSync()
+        }
     }
 
     override fun onPlayWhenReadyChanged(
@@ -603,6 +653,7 @@ class PlayerConnection(
         currentMediaItemIndex.value = player.currentMediaItemIndex
         currentWindowIndex.value = player.getCurrentQueueIndex()
         updateCanSkipPreviousAndNext()
+        checkAndTriggerLyricsSync()
     }
 
     override fun onTimelineChanged(
