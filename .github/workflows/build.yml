@@ -1,69 +1,4 @@
-name: Build APKs
-
-on:
-  workflow_dispatch:
-  push:
-    branches: ["**"]
-    paths-ignore:
-      - "README.md"
-      - "fastlane/**"
-      - "assets/**"
-      - ".github/**/*.md"
-      - ".github/FUNDING.yml"
-      - ".github/ISSUE_TEMPLATE/**"
-
-permissions:
-  contents: write
-  discussions: write
-
-jobs:
-  build_release:
-    name: Build Release (FOSS)
-    if: github.actor != 'dependabot[bot]' && github.actor != 'renovate[bot]'
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: recursive
-
-      - name: Set up JDK 21
-        uses: actions/setup-java@v5
-        with:
-          java-version: "21"
-          distribution: "temurin"
-
-      - name: Set Up Gradle
-        uses: gradle/actions/setup-gradle@v5
-
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
-
-      - name: Build Release APK and Run Lint
-        run: ./gradlew --console=plain assembleFossRelease :app:lintFossRelease --warning-mode summary
-        env:
-          METROLIST_APPLICATION_ID: com.metrolist.music
-          METROLIST_APP_NAME: Metrolist Nightly
-          PULL_REQUEST: "false"
-          GITHUB_EVENT_NAME: ${{ github.event_name }}
-          LASTFM_API_KEY: "dummy_lastfm_api_key_here"
-          LASTFM_SECRET: "dummy_lastfm_secret_here"
-
-      - name: Move APK
-        run: |
-          OUTPUT_DIR="app/build/outputs/apk/foss/release"
-          mkdir -p "$OUTPUT_DIR/out"
-          # Since the signing step was removed, this outputs an unsigned APK
-          TARGET_NAME="app-foss-release-unsigned.apk"
-          find "$OUTPUT_DIR" -name "*.apk" | xargs -I{} mv {} "$OUTPUT_DIR/out/$TARGET_NAME"
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v6
-        with:
-          name: app-release-foss
-          path: app/build/outputs/apk/foss/release/out/*
-
-  build_debug:
+build_debug:
     name: Build Debug (FOSS)
     if: github.actor != 'dependabot[bot]' && github.actor != 'renovate[bot]'
     runs-on: ubuntu-latest
@@ -84,6 +19,11 @@ jobs:
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
+
+      - name: Generate Dummy Debug Keystore
+        run: |
+          mkdir -p ~/.android
+          keytool -genkey -v -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "C=US, O=Android, CN=Android Debug"
 
       - name: Build Debug APK and Run Lint
         run: ./gradlew --console=plain assembleFossDebug :app:lintFossDebug --warning-mode summary
