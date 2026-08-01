@@ -232,7 +232,7 @@ class PlayerConnection(
 
         // Ticker loop for high-precision OverlayLyricsService state updates
         scope.launch {
-            while (kotlinx.coroutines.isActive) {
+            while (isActive) {
                 val p = getPlayerOrNull()
                 if (p != null) {
                     val videoId = mediaMetadata.value?.id ?: ""
