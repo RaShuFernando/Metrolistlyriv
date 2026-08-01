@@ -52,7 +52,11 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import androidx.navigation.NavController
+import android.widget.Toast
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import com.metrolist.music.LocalDatabase
+import com.metrolist.music.lyrics.vault.LyricsSyncManager
 import com.metrolist.music.LocalPlayerAwareWindowInsets
 import com.metrolist.music.R
 import com.metrolist.music.constants.AppLanguageKey
@@ -103,6 +107,8 @@ fun ContentSettings(
 ) {
     val context = LocalContext.current
     val database = LocalDatabase.current
+    val coroutineScope = rememberCoroutineScope()
+    var isReindexing by remember { mutableStateOf(false) }
     // Used only before Android 13
     val (appLanguage, onAppLanguageChange) = rememberPreference(key = AppLanguageKey, defaultValue = SYSTEM_DEFAULT)
 
@@ -921,6 +927,26 @@ fun ContentSettings(
                     icon = painterResource(R.drawable.language_korean_latin),
                     title = { Text(stringResource(R.string.lyrics_romanization)) },
                     onClick = { navController.navigate("settings/content/romanization") }
+                ),
+                Material3SettingsItem(
+                    icon = painterResource(R.drawable.sync),
+                    title = { Text(stringResource(R.string.reindex_lyrivault_db)) },
+                    description = { Text(stringResource(R.string.reindex_lyrivault_db_desc)) },
+                    onClick = {
+                        if (!isReindexing) {
+                            isReindexing = true
+                            Toast.makeText(context, context.getString(R.string.reindex_started), Toast.LENGTH_SHORT).show()
+                            coroutineScope.launch {
+                                val count = LyricsSyncManager.reindexDatabase(context)
+                                Toast.makeText(
+                                    context,
+                                    context.getString(R.string.reindex_finished, count),
+                                    Toast.LENGTH_LONG
+                                ).show()
+                                isReindexing = false
+                            }
+                        }
+                    }
                 )
             )
         )

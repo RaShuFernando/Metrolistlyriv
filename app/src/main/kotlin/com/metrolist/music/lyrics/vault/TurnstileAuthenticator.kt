@@ -29,15 +29,26 @@ class TurnstileAuthenticator(private val context: Context) {
     private val prefs = context.getSharedPreferences("turnstile_prefs", Context.MODE_PRIVATE)
 
     fun getCachedToken(): String? {
+        val savedTime = prefs.getLong("cached_token_timestamp", 0L)
+        if (System.currentTimeMillis() - savedTime > 60_000L) {
+            clearCachedToken()
+            return null
+        }
         return prefs.getString("cached_token", null)?.takeIf { it.isNotBlank() }
     }
 
     fun saveCachedToken(token: String) {
-        prefs.edit().putString("cached_token", token).apply()
+        prefs.edit()
+            .putString("cached_token", token)
+            .putLong("cached_token_timestamp", System.currentTimeMillis())
+            .apply()
     }
 
     fun clearCachedToken() {
-        prefs.edit().remove("cached_token").apply()
+        prefs.edit()
+            .remove("cached_token")
+            .remove("cached_token_timestamp")
+            .apply()
     }
     
     @SuppressLint("SetJavaScriptEnabled")

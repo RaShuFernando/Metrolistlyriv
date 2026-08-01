@@ -4,15 +4,21 @@ import android.content.Context
 import android.os.Environment
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 
 object LyricsSyncManager {
 
     private const val TAG = "LyricsSyncManager"
 
+    private val activeSyncKeys = ConcurrentHashMap.newKeySet<String>()
+    private val recentSyncTimestamps = ConcurrentHashMap<String, Long>()
+    private const val DEBOUNCE_WINDOW_MS = 10_000L
+
     fun getMasterFolderPath(): String {
         val extStorage = Environment.getExternalStorageDirectory()
-        val vaultDir = File(extStorage, "Lyrivault")
+        val vaultDir = File(extStorage, "SongSync")
         if (!vaultDir.exists()) {
             vaultDir.mkdirs()
         }
@@ -20,12 +26,27 @@ object LyricsSyncManager {
     }
 
     suspend fun syncLyrics(context: Context, metadata: VaultMetadata) = withContext(Dispatchers.IO) {
-        val masterPath = getMasterFolderPath()
-        val vaultManager = VaultManager(masterPath)
-        val db = DatabaseProvider.getDatabase(context, masterPath)
-        val dao = db.libraryDao()
+        val syncKey = metadata.videoId.takeIf { it.isNotBlank() }
+            ?: "${metadata.artist}_${metadata.album}_${metadata.title}"
+
+        if (!activeSyncKeys.add(syncKey)) {
+            FileLogger.d(TAG, "Sync already in progress for song: ${metadata.title} ($syncKey). Dropping duplicate event.")
+            return@withContext
+        }
+
+        val lastSync = recentSyncTimestamps[syncKey] ?: 0L
+        if (System.currentTimeMillis() - lastSync < DEBOUNCE_WINDOW_MS) {
+            FileLogger.d(TAG, "Song was recently synced: ${metadata.title} ($syncKey). Dropping event.")
+            activeSyncKeys.remove(syncKey)
+            return@withContext
+        }
 
         try {
+            val masterPath = getMasterFolderPath()
+            val vaultManager = VaultManager(masterPath)
+            val db = DatabaseProvider.getDatabase(context, masterPath)
+            val dao = db.libraryDao()
+
             // Step a) Local Room DB Cache Check
             val existingSong = dao.getSongByVideoId(metadata.videoId)
                 ?: dao.checkSongExists(metadata.title, metadata.artist)
@@ -171,7 +192,90 @@ object LyricsSyncManager {
             FileLogger.d(TAG, "Successfully archived lyrics and metadata for: ${metadata.title}")
         } catch (e: Exception) {
             FileLogger.e(TAG, "Error in syncLyrics pipeline for ${metadata.title}", e)
+        } finally {
+            recentSyncTimestamps[syncKey] = System.currentTimeMillis()
+            activeSyncKeys.remove(syncKey)
         }
+    }
+
+    suspend fun reindexDatabase(context: Context): Int = withContext(Dispatchers.IO) {
+        val masterPath = getMasterFolderPath()
+        val vaultManager = VaultManager(masterPath)
+        val db = DatabaseProvider.getDatabase(context, masterPath)
+        val dao = db.libraryDao()
+
+        val lyricsDatabaseDir = File(masterPath, "LyricsDatabase")
+        if (!lyricsDatabaseDir.exists() || !lyricsDatabaseDir.isDirectory) {
+            FileLogger.d(TAG, "LyricsDatabase directory does not exist for re-indexing.")
+            return@withContext 0
+        }
+
+        val metadataFiles = lyricsDatabaseDir.walkTopDown()
+            .filter { it.isFile && it.name == "metadata.json" }
+            .toList()
+
+        var reindexedCount = 0
+
+        for (metadataFile in metadataFiles) {
+            try {
+                val jsonText = metadataFile.readText()
+                val json = JSONObject(jsonText)
+
+                val videoId = json.optString("videoId").takeIf { it.isNotBlank() }
+                val title = json.optString("title")
+                val artist = json.optString("artist")
+                val album = json.optString("album")
+                val durationSeconds = json.optInt("durationSeconds", 0)
+                val artistBrowseId = json.optString("artistBrowseId").takeIf { it.isNotBlank() }
+                val albumBrowseId = json.optString("albumBrowseId").takeIf { it.isNotBlank() }
+
+                if (title.isBlank() || artist.isBlank()) continue
+
+                val artistId = ensureArtist(dao, artist, artistBrowseId)
+                val albumName = album.ifBlank { "Unknown Album" }
+                val albumId = ensureAlbum(dao, albumName, albumBrowseId, artistId)
+
+                val lyricsArray = json.optJSONArray("lyrics")
+                val hasLyrics = lyricsArray != null && lyricsArray.length() > 0
+
+                val songId = ensureSong(
+                    dao = dao,
+                    title = title,
+                    videoId = videoId,
+                    albumId = albumId,
+                    durationSeconds = durationSeconds,
+                    hasLyrics = hasLyrics
+                )
+
+                if (lyricsArray != null && lyricsArray.length() > 0) {
+                    dao.deleteFilesForSong(songId)
+                    for (i in 0 until lyricsArray.length()) {
+                        val lyricObj = lyricsArray.optJSONObject(i) ?: continue
+                        val provider = lyricObj.optString("provider")
+                        val type = lyricObj.optString("type")
+                        val fileName = lyricObj.optString("file_name")
+                        if (provider.isNotBlank() && type.isNotBlank() && fileName.isNotBlank()) {
+                            val relPath = "${vaultManager.sanitize(artist)}/${vaultManager.sanitize(album)}/${vaultManager.sanitize(title)}/$fileName"
+                            dao.insertFile(
+                                FileEntity(
+                                    songId = songId,
+                                    providerName = provider,
+                                    syncLevel = type,
+                                    relativePath = relPath
+                                )
+                            )
+                        }
+                    }
+                }
+
+                reindexedCount++
+            } catch (e: Exception) {
+                FileLogger.e(TAG, "Error parsing metadata file during reindex: ${metadataFile.absolutePath}", e)
+            }
+        }
+
+        FileLogger.d(TAG, "Re-indexed $reindexedCount songs in Lyrivault Room database.")
+        reindexedCount
     }
 
     private suspend fun ensureArtist(dao: LibraryDao, artistName: String, browseId: String?): Int {

@@ -1016,4 +1016,10 @@
     <string name="stream_source_web_creator_desc">Creator web client.</string>
     <string name="stream_source_android_creator">ANDROID_CREATOR</string>
     <string name="stream_source_android_creator_desc">Android creator client. Off by default; needs DroidGuard.</string>
+
+    <!-- Lyrivault Settings -->
+    <string name="reindex_lyrivault_db">Re-index Lyrivault Database</string>
+    <string name="reindex_lyrivault_db_desc">Rebuild local database state from stored Lyrivault metadata files</string>
+    <string name="reindex_started">Re-indexing Lyrivault database…</string>
+    <string name="reindex_finished">Re-indexed %1$d songs in Lyrivault database.</string>
 </resources>
