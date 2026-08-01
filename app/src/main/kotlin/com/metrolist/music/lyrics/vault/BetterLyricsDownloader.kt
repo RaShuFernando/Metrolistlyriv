@@ -21,10 +21,11 @@ object BetterLyricsDownloader {
         artistName: String,
         albumName: String,
         durationSeconds: Int,
+        description: String = "",
         jwtToken: String
     ): File? = withContext(Dispatchers.IO) {
         try {
-            val formBody = FormBody.Builder()
+            val formBodyBuilder = FormBody.Builder()
                 .add("videoId", videoId)
                 .add("song", songTitle)
                 .add("artist", artistName)
@@ -32,7 +33,12 @@ object BetterLyricsDownloader {
                 .add("duration", durationSeconds.toString())
                 .add("alwaysFetchMetadata", "false")
                 .add("token", jwtToken)
-                .build()
+
+            if (description.isNotEmpty()) {
+                formBodyBuilder.add("description", description)
+            }
+
+            val formBody = formBodyBuilder.build()
 
             val request = Request.Builder()
                 .url("https://lyrics.api.dacubeking.com/v2/lyrics")

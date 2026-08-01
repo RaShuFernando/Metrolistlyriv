@@ -1,6 +1,12 @@
 package com.metrolist.music.lyrics.vault
 
 import java.io.File
+import java.io.StringReader
+import java.io.StringWriter
+import javax.xml.transform.OutputKeys
+import javax.xml.transform.TransformerFactory
+import javax.xml.transform.stream.StreamResult
+import javax.xml.transform.stream.StreamSource
 import org.json.JSONObject
 
 data class ParsedLyrics(
@@ -40,9 +46,34 @@ class SseParser {
     )
 
     private fun formatForHumanReading(text: String, format: String): String {
-        return if (format == "ttml" || format == "qrc" || text.startsWith("<?xml")) {
-            text.replace("><", ">\\n<") 
-        } else text // Leave .lrc and .elrc strictly alone
+        val trimmed = text.trim()
+        val isXml = format == "ttml" || format == "qrc" || trimmed.startsWith("<tt") || trimmed.startsWith("<?xml")
+        if (!isXml) return text // Leave .lrc and .elrc strictly alone
+
+        return try {
+            val factory = TransformerFactory.newInstance()
+            try {
+                factory.setAttribute("indent-number", 2)
+            } catch (_: Exception) {}
+
+            val transformer = factory.newTransformer()
+            transformer.setOutputProperty(OutputKeys.INDENT, "yes")
+            transformer.setOutputProperty("{http://xml.apache.org/xslt}indent-amount", "2")
+
+            if (!trimmed.startsWith("<?xml")) {
+                transformer.setOutputProperty(OutputKeys.OMIT_XML_DECLARATION, "yes")
+            }
+
+            val writer = StringWriter()
+            val source = StreamSource(StringReader(text))
+            val result = StreamResult(writer)
+            transformer.transform(source, result)
+
+            val formatted = writer.toString().trim()
+            if (formatted.isNotEmpty()) formatted else text
+        } catch (e: Exception) {
+            text.replace("><", ">\n<")
+        }
     }
 
     fun parse(sseFile: File): List<ParsedLyrics> {

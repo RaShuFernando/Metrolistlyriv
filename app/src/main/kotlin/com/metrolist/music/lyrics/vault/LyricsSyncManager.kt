@@ -66,6 +66,7 @@ object LyricsSyncManager {
                 artistName = metadata.artist,
                 albumName = metadata.album,
                 durationSeconds = metadata.durationSeconds,
+                description = metadata.description ?: "",
                 jwtToken = jwtToken
             )
 

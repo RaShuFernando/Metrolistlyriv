@@ -15,6 +15,7 @@ data class VaultMetadata(
     val durationSeconds: Int,
     val albumArtUrl: String,
     val composer: String,
+    val description: String? = null,
     val mediaId: String,
     val releaseYear: Int? = null,
     val trackNumber: Int? = null,
@@ -115,6 +116,7 @@ class VaultManager(private val masterFolderPath: String) {
             put("durationSeconds", metadata.durationSeconds)
             put("albumArtUrl", metadata.albumArtUrl)
             put("composer", metadata.composer)
+            put("description", metadata.description ?: "")
             put("mediaId", metadata.mediaId)
             put("releaseYear", metadata.releaseYear ?: JSONObject.NULL)
             put("trackNumber", metadata.trackNumber ?: JSONObject.NULL)

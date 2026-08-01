@@ -16,6 +16,7 @@ import androidx.media3.common.Player.REPEAT_MODE_OFF
 import androidx.media3.common.Player.STATE_ENDED
 import androidx.media3.common.Timeline
 import androidx.media3.exoplayer.ExoPlayer
+import com.metrolist.innertube.YouTube
 import com.metrolist.music.constants.SleepTimerCustomDaysKey
 import com.metrolist.music.constants.SleepTimerDayTimesKey
 import com.metrolist.music.constants.SleepTimerDefaultKey
@@ -243,25 +244,30 @@ class PlayerConnection(
 
         if (durationSeconds <= 0) return
 
-        lastSyncedVideoId = metadata.id
-
-        val vaultMetadata = VaultMetadata(
-            videoId = metadata.id,
-            title = metadata.title,
-            artist = metadata.artists.joinToString(", ") { it.name },
-            album = metadata.album?.title ?: "",
-            durationSeconds = durationSeconds,
-            albumArtUrl = metadata.thumbnailUrl ?: "",
-            composer = "",
-            mediaId = metadata.id,
-            releaseYear = null,
-            trackNumber = null,
-            artistBrowseId = metadata.artists.firstOrNull()?.id,
-            albumBrowseId = metadata.album?.id,
-            isExplicit = metadata.explicit
-        )
-
         scope.launch(Dispatchers.IO) {
+            val description = try {
+                YouTube.getMediaInfo(metadata.id).getOrNull()?.description ?: ""
+            } catch (e: Exception) {
+                ""
+            }
+
+            val vaultMetadata = VaultMetadata(
+                videoId = metadata.id,
+                title = metadata.title,
+                artist = metadata.artists.joinToString(", ") { it.name },
+                album = metadata.album?.title ?: "",
+                durationSeconds = durationSeconds,
+                albumArtUrl = metadata.thumbnailUrl ?: "",
+                composer = "",
+                description = description,
+                mediaId = metadata.id,
+                releaseYear = null,
+                trackNumber = null,
+                artistBrowseId = metadata.artists.firstOrNull()?.id,
+                albumBrowseId = metadata.album?.id,
+                isExplicit = metadata.explicit
+            )
+
             LyricsSyncManager.syncLyrics(context.applicationContext, vaultMetadata)
         }
     }
