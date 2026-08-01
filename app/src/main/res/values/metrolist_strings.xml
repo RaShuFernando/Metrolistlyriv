@@ -1026,4 +1026,18 @@
     <string name="reindex_lyrivault_db_desc">Rebuild local database state from stored Lyrivault metadata files</string>
     <string name="reindex_started">Re-indexing Lyrivault database…</string>
     <string name="reindex_finished">Re-indexed %1$d songs in Lyrivault database.</string>
+
+    <!-- Overlay Lyrics -->
+    <string name="overlay_lyrics">Overlay lyrics</string>
+    <string name="overlay_lyrics_desc">Display floating lyrics on screen over other applications</string>
+    <string name="overlay_lyrics_master_toggle">Enable Overlay Lyrics</string>
+    <string name="overlay_lyrics_master_toggle_desc">Show floating lyrics engine view over top of apps</string>
+    <string name="overlay_lyrics_font_size">Overlay Font Size</string>
+    <string name="overlay_lyrics_version_selector">Lyric Version Selector</string>
+    <string name="overlay_lyrics_version_selector_desc">Choose active lyric version file for current song</string>
+    <string name="overlay_permission_required">Overlay Permission Required</string>
+    <string name="overlay_permission_required_desc">Please grant system alert window permission in Android settings to use overlay lyrics.</string>
+    <string name="no_song_playing">No song currently playing</string>
+    <string name="no_versions_found">No lyric versions found for current song</string>
 </resources>
+

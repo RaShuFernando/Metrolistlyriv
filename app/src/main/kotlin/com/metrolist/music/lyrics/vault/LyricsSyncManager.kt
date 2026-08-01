@@ -152,9 +152,9 @@ object LyricsSyncManager {
                 lyricFile.writeText(lyric.lyricsText)
             }
 
-            // Write metadata.json with last_checked, last_updated, and parsed lyrics array
+            // Write metadata.json with ranking & get highest ranked activeLyricFile
             val now = System.currentTimeMillis()
-            vaultManager.writeMetadataJson(
+            val activeLyricFile = vaultManager.writeMetadataJsonWithRanking(
                 parsedVaultDir = parsedVaultDir,
                 metadata = metadata,
                 parsedLyricsList = parsedLyricsList,
@@ -162,7 +162,7 @@ object LyricsSyncManager {
                 lastUpdated = now
             )
 
-            // Room Database update
+            // Room Database lightweight index update
             val hasLyrics = parsedLyricsList.isNotEmpty()
             val songId = ensureSong(
                 dao = dao,
@@ -172,6 +172,18 @@ object LyricsSyncManager {
                 durationSeconds = metadata.durationSeconds,
                 hasLyrics = hasLyrics
             )
+
+            if (activeLyricFile != null) {
+                dao.insertOrUpdateSongIndex(
+                    SongIndexEntity(
+                        title = metadata.title,
+                        artist = metadata.artist,
+                        videoId = metadata.videoId,
+                        folderPath = parsedVaultDir.absolutePath,
+                        activeLyricFile = activeLyricFile
+                    )
+                )
+            }
 
             if (parsedLyricsList.isNotEmpty()) {
                 dao.deleteFilesForSong(songId)

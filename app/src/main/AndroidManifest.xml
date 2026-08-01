@@ -388,6 +388,11 @@
             </intent-filter>
         </service>
 
+        <!-- Overlay Lyrics Service -->
+        <service
+            android:name=".lyrics.overlay.OverlayLyricsService"
+            android:exported="false" />
+
     </application>
 
 </manifest>

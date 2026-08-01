@@ -227,7 +227,22 @@ class PlayerConnection(
                 checkAndTriggerLyricsSync()
             }
         }
+
+        // Ticker loop for high-precision OverlayLyricsService state updates
+        scope.launch {
+            while (kotlinx.coroutines.isActive) {
+                val p = getPlayerOrNull()
+                if (p != null) {
+                    val videoId = mediaMetadata.value?.id ?: ""
+                    val pos = p.currentPosition
+                    val isPlayingNow = p.isPlaying
+                    com.metrolist.music.lyrics.overlay.OverlayLyricsService.updatePlaybackState(videoId, pos, isPlayingNow)
+                }
+                delay(100L)
+            }
+        }
     }
+
 
     private var lastSyncedVideoId: String? = null
 

@@ -11,9 +11,10 @@ import java.io.File
         ArtistEntity::class,
         AlbumEntity::class,
         SongEntity::class,
-        FileEntity::class
+        FileEntity::class,
+        SongIndexEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

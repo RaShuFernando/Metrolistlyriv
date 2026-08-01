@@ -75,3 +75,17 @@ data class FileEntity(
     val syncLevel: String,
     val relativePath: String
 )
+
+@Entity(
+    tableName = "song_index",
+    indices = [Index(value = ["videoId"], unique = true)]
+)
+data class SongIndexEntity(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val title: String,
+    val artist: String,
+    val videoId: String,
+    val folderPath: String,
+    val activeLyricFile: String
+)
+

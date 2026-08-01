@@ -373,6 +373,10 @@ fun NavGraphBuilder.navigationBuilder(
         PlayerSettings(navController)
     }
 
+    composable("settings/overlay_lyrics") {
+        com.metrolist.music.ui.screens.settings.OverlayLyricsSettingsScreen(navController)
+    }
+
     composable("settings/stream_sources") {
         StreamSourcesSettings(navController)
     }

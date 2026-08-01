@@ -6,6 +6,11 @@ import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
 
 data class VaultMetadata(
     val videoId: String,
@@ -25,6 +30,15 @@ data class VaultMetadata(
 )
 
 class VaultManager(private val masterFolderPath: String) {
+
+    companion object {
+        val metadataMutex = Mutex()
+        val jsonSerializer = Json {
+            ignoreUnknownKeys = true
+            prettyPrint = true
+            encodeDefaults = true
+        }
+    }
 
     private val masterDir = File(masterFolderPath)
     private val rawSseDir = File(masterDir, "RawSse")
@@ -126,6 +140,91 @@ class VaultManager(private val masterFolderPath: String) {
         return destinationFile
     }
 
+    suspend fun writeMetadataJsonWithRanking(
+        parsedVaultDir: File,
+        metadata: VaultMetadata,
+        parsedLyricsList: List<ParsedLyrics> = emptyList(),
+        lastChecked: Long = System.currentTimeMillis(),
+        lastUpdated: Long = System.currentTimeMillis()
+    ): String? = withContext(Dispatchers.IO) {
+        metadataMutex.withLock {
+            val lyricFileInfos = parsedLyricsList.map { lyric ->
+                val fileName = "${sanitize(metadata.title)}_${sanitize(lyric.provider)}_${sanitize(lyric.type)}.${lyric.format.lowercase()}"
+                val rank = LyricsRanking.getRank(lyric.provider, lyric.type)
+                LyricFileInfo(
+                    provider = lyric.provider,
+                    type = lyric.type,
+                    format = lyric.format,
+                    filename = fileName,
+                    rank = rank
+                )
+            }
+
+            val lyricMetadata = LyricMetadata(
+                videoId = metadata.videoId,
+                title = metadata.title,
+                artist = metadata.artist,
+                album = metadata.album,
+                durationSeconds = metadata.durationSeconds,
+                albumArtUrl = metadata.albumArtUrl,
+                lyrics = lyricFileInfos,
+                last_checked = lastChecked,
+                last_updated = lastUpdated
+            )
+
+            val metadataFile = File(parsedVaultDir, "metadata.json")
+            val jsonString = jsonSerializer.encodeToString(LyricMetadata.serializer(), lyricMetadata)
+            metadataFile.writeText(jsonString)
+
+            return@withLock LyricsRanking.selectActiveLyricFile(lyricFileInfos)
+        }
+    }
+
+    suspend fun readMetadataJson(parsedVaultDir: File): LyricMetadata? = withContext(Dispatchers.IO) {
+        metadataMutex.withLock {
+            val metadataFile = File(parsedVaultDir, "metadata.json")
+            if (!metadataFile.exists()) return@withLock null
+            try {
+                val content = metadataFile.readText()
+                jsonSerializer.decodeFromString(LyricMetadata.serializer(), content)
+            } catch (e: Exception) {
+                FileLogger.e("VaultManager", "Error reading metadata.json", e)
+                null
+            }
+        }
+    }
+
+    suspend fun updateLyricFileRankOverride(
+        parsedVaultDir: File,
+        selectedFilename: String
+    ): LyricMetadata? = withContext(Dispatchers.IO) {
+        metadataMutex.withLock {
+            val metadataFile = File(parsedVaultDir, "metadata.json")
+            if (!metadataFile.exists()) return@withLock null
+            try {
+                val content = metadataFile.readText()
+                val existing = jsonSerializer.decodeFromString(LyricMetadata.serializer(), content)
+                val updatedLyrics = existing.lyrics.map { info ->
+                    if (info.filename == selectedFilename) {
+                        info.copy(rank = 0)
+                    } else {
+                        info
+                    }
+                }
+                val updatedMetadata = existing.copy(
+                    lyrics = updatedLyrics,
+                    last_updated = System.currentTimeMillis()
+                )
+                val jsonString = jsonSerializer.encodeToString(LyricMetadata.serializer(), updatedMetadata)
+                metadataFile.writeText(jsonString)
+                updatedMetadata
+            } catch (e: Exception) {
+                FileLogger.e("VaultManager", "Error updating rank override in metadata.json", e)
+                null
+            }
+        }
+    }
+
     fun writeMetadataJson(
         parsedVaultDir: File,
         metadata: VaultMetadata,
@@ -172,3 +271,4 @@ class VaultManager(private val masterFolderPath: String) {
         FileLogger.log(module, error)
     }
 }
+
