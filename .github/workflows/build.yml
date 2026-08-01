@@ -39,17 +39,17 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Generate Dummy Release Keystore
+      - name: Decode Real Release Keystore
         run: |
-          keytool -genkey -v -keystore my-upload-key.jks -storepass android -alias upload -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "C=US, O=Android, CN=Dummy Release Key"
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > my-upload-key.jks
 
       - name: Build Release APK and Run Lint
         run: ./gradlew --console=plain assembleFossRelease :app:lintFossRelease --warning-mode summary
         env:
-          # Pass the dummy keystore details to Gradle
           KEYSTORE_PATH: my-upload-key.jks
-          STORE_PASSWORD: android
-          KEY_PASSWORD: android
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           
           METROLIST_APPLICATION_ID: com.metrolist.music
           METROLIST_APP_NAME: Metrolist Nightly
@@ -62,7 +62,6 @@ jobs:
         run: |
           OUTPUT_DIR="app/build/outputs/apk/foss/release"
           mkdir -p "$OUTPUT_DIR/out"
-          # It is now signed!
           TARGET_NAME="app-foss-release-signed.apk"
           find "$OUTPUT_DIR" -name "*.apk" | xargs -I{} mv {} "$OUTPUT_DIR/out/$TARGET_NAME"
 
