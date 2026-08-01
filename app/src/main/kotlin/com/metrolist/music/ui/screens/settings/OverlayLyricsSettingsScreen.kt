@@ -126,7 +126,7 @@ fun OverlayLyricsSettingsScreen(
                 title = stringResource(R.string.overlay_lyrics),
                 items = listOf(
                     Material3SettingsItem(
-                        icon = painterResource(R.drawable.subtitles),
+                        icon = painterResource(R.drawable.lyrics),
                         title = { Text(stringResource(R.string.overlay_lyrics_master_toggle)) },
                         description = { Text(stringResource(R.string.overlay_lyrics_master_toggle_desc)) },
                         trailingContent = {
@@ -162,7 +162,7 @@ fun OverlayLyricsSettingsScreen(
                 title = stringResource(R.string.customize_colors),
                 items = listOf(
                     Material3SettingsItem(
-                        icon = painterResource(R.drawable.text_fields),
+                        icon = painterResource(R.drawable.sliders),
                         title = { Text(stringResource(R.string.overlay_lyrics_font_size)) },
                         description = {
                             Column {

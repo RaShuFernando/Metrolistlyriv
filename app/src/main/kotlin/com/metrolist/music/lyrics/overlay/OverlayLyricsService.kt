@@ -68,6 +68,10 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
+import androidx.lifecycle.setViewTreeLifecycleOwner
+import androidx.lifecycle.setViewTreeViewModelStoreOwner
+import androidx.savedstate.setViewTreeSavedStateRegistryOwner
+
 class ServiceLifecycleOwner : LifecycleOwner, SavedStateRegistryOwner, ViewModelStoreOwner {
     private val lifecycleRegistry = LifecycleRegistry(this)
     private val savedStateRegistryController = SavedStateRegistryController.create(this)
@@ -169,9 +173,9 @@ class OverlayLyricsService : Service() {
         }
 
         composeView = ComposeView(this).apply {
-            ViewTreeLifecycleOwner.set(this, lifecycleOwner)
-            ViewTreeSavedStateRegistryOwner.set(this, lifecycleOwner)
-            ViewTreeViewModelStoreOwner.set(this, lifecycleOwner)
+            setViewTreeLifecycleOwner(lifecycleOwner)
+            setViewTreeSavedStateRegistryOwner(lifecycleOwner)
+            setViewTreeViewModelStoreOwner(lifecycleOwner)
 
             setContent {
                 val lyrics by currentLyrics.collectAsState()
