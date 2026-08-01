@@ -68,17 +68,36 @@ class VaultManager(private val masterFolderPath: String) {
         return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
+    fun updateMetadataLastCheckedOnly(parsedVaultDir: File, timestamp: Long = System.currentTimeMillis()) {
+        val metadataFile = File(parsedVaultDir, "metadata.json")
+        if (metadataFile.exists()) {
+            try {
+                val json = JSONObject(metadataFile.readText())
+                json.put("last_checked", timestamp)
+                metadataFile.writeText(json.toString(2))
+            } catch (e: Exception) {
+                FileLogger.e("VaultManager", "Failed to update last_checked in metadata.json", e)
+            }
+        }
+    }
+
     fun processNewSseFile(tempFile: File, artist: String, album: String, song: String): File? {
         val vaultDir = getSongRawVaultDir(artist, album, song)
         val changelogFile = File(vaultDir, "${sanitize(song)}_changelog.json")
         val fileHash = calculateSha256(tempFile)
+        val now = System.currentTimeMillis()
 
         if (changelogFile.exists()) {
             val changelog = JSONObject(changelogFile.readText())
             if (changelog.optString("active_version_hash") == fileHash) {
-                // Duplicate file, just update timestamp
-                changelog.put("last_checked", System.currentTimeMillis())
+                // Duplicate file, update changelog timestamp
+                changelog.put("last_checked", now)
                 changelogFile.writeText(changelog.toString())
+
+                // Update existing metadata.json last_checked timestamp ONLY
+                val parsedVaultDir = getSongParsedVaultDir(artist, album, song)
+                updateMetadataLastCheckedOnly(parsedVaultDir, now)
+
                 tempFile.delete()
                 return null // Indicates no new parsing needed
             }
@@ -99,15 +118,33 @@ class VaultManager(private val masterFolderPath: String) {
         val json = JSONObject().apply {
             put("latest_version", newVersionNum)
             put("active_version_hash", fileHash)
-            put("last_updated", System.currentTimeMillis())
-            put("last_checked", System.currentTimeMillis())
+            put("last_updated", now)
+            put("last_checked", now)
         }
         changelogFile.writeText(json.toString())
         
         return destinationFile
     }
 
-    fun writeMetadataJson(parsedVaultDir: File, metadata: VaultMetadata) {
+    fun writeMetadataJson(
+        parsedVaultDir: File,
+        metadata: VaultMetadata,
+        parsedLyricsList: List<ParsedLyrics> = emptyList(),
+        lastChecked: Long = System.currentTimeMillis(),
+        lastUpdated: Long = System.currentTimeMillis()
+    ) {
+        val lyricsArray = org.json.JSONArray()
+        parsedLyricsList.forEach { lyric ->
+            val fileName = "${sanitize(metadata.title)}_${sanitize(lyric.provider)}_${sanitize(lyric.type)}.${lyric.format.lowercase()}"
+            val lyricObj = JSONObject().apply {
+                put("provider", lyric.provider)
+                put("type", lyric.type)
+                put("format", lyric.format)
+                put("file_name", fileName)
+            }
+            lyricsArray.put(lyricObj)
+        }
+
         val json = JSONObject().apply {
             put("videoId", metadata.videoId)
             put("title", metadata.title)
@@ -123,14 +160,15 @@ class VaultManager(private val masterFolderPath: String) {
             put("artistBrowseId", metadata.artistBrowseId ?: JSONObject.NULL)
             put("albumBrowseId", metadata.albumBrowseId ?: JSONObject.NULL)
             put("isExplicit", metadata.isExplicit)
+            put("last_checked", lastChecked)
+            put("last_updated", lastUpdated)
+            put("lyrics", lyricsArray)
         }
         val metadataFile = File(parsedVaultDir, "metadata.json")
         metadataFile.writeText(json.toString(2))
     }
 
     fun writeErrorLog(module: String, error: String) {
-        val logFile = File(masterDir, "debug_log.txt")
-        val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
-        logFile.appendText("[$timestamp] [$module] $error\n")
+        FileLogger.log(module, error)
     }
 }

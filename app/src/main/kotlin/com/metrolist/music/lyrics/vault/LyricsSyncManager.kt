@@ -3,10 +3,7 @@ package com.metrolist.music.lyrics.vault
 import android.content.Context
 import android.os.Environment
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
-import timber.log.Timber
 import java.io.File
 
 object LyricsSyncManager {
@@ -36,53 +33,91 @@ object LyricsSyncManager {
             if (existingSong != null && existingSong.hasLyricsAvailable && existingSong.lastCheckedAt > 0) {
                 val dayInMs = 24 * 60 * 60 * 1000L
                 if (System.currentTimeMillis() - existingSong.lastCheckedAt < dayInMs) {
-                    Timber.tag(TAG).d("Lyrics already cached locally for song: ${metadata.title}")
+                    FileLogger.d(TAG, "Lyrics already cached locally for song: ${metadata.title}")
                     return@withContext
                 }
             }
 
-            // Step b) Turnstile Authentication
+            // Step b) Turnstile Authentication & SSE Stream Download (with Retry Mechanism)
             val authenticator = TurnstileAuthenticator(context)
-            val token = withTimeoutOrNull(30_000L) {
-                authenticator.getTurnstileToken().first()
-            }
+            var jwtToken: String? = null
+            var tempFile: File? = null
 
-            if (token.isNullOrEmpty()) {
-                vaultManager.writeErrorLog("Turnstile", "Failed to get Turnstile token within timeout for: ${metadata.title}")
-                return@withContext
-            }
+            var attempt = 0
+            val maxAttempts = 2
 
-            val jwtToken = authenticator.verifyToken(token)
-            if (jwtToken.isNullOrEmpty()) {
-                vaultManager.writeErrorLog("Turnstile", "Turnstile token verification failed for: ${metadata.title}")
-                return@withContext
-            }
+            while (attempt < maxAttempts && tempFile == null) {
+                attempt++
+                val forceRefresh = (attempt > 1)
+                try {
+                    if (forceRefresh) {
+                        FileLogger.d(TAG, "Forcing fresh WebView challenge on retry attempt $attempt for ${metadata.title}")
+                        authenticator.clearCachedToken()
+                    }
 
-            // Step c) Fetch SSE stream via BetterLyricsDownloader
-            val tempFile = BetterLyricsDownloader.downloadSseStream(
-                context = context,
-                videoId = metadata.videoId,
-                songTitle = metadata.title,
-                artistName = metadata.artist,
-                albumName = metadata.album,
-                durationSeconds = metadata.durationSeconds,
-                description = metadata.description ?: "",
-                jwtToken = jwtToken
-            )
+                    val turnstileToken = authenticator.getTurnstileToken(forceRefresh = forceRefresh)
+                    jwtToken = authenticator.verifyToken(turnstileToken)
+
+                    tempFile = BetterLyricsDownloader.downloadSseStream(
+                        context = context,
+                        videoId = metadata.videoId,
+                        songTitle = metadata.title,
+                        artistName = metadata.artist,
+                        albumName = metadata.album,
+                        durationSeconds = metadata.durationSeconds,
+                        description = metadata.description ?: "",
+                        jwtToken = jwtToken
+                    )
+
+                    if (tempFile == null) {
+                        FileLogger.e(TAG, "Failed to download SSE stream (returned null) for: ${metadata.title}")
+                        break
+                    }
+                } catch (e: TurnstileVerificationFailed) {
+                    FileLogger.e(TAG, "TurnstileVerificationFailed on attempt $attempt for ${metadata.title}: ${e.message}", e)
+                    authenticator.clearCachedToken()
+                    if (attempt >= maxAttempts) break
+                } catch (e: TurnstileTimeout) {
+                    FileLogger.e(TAG, "TurnstileTimeout on attempt $attempt for ${metadata.title}: ${e.message}", e)
+                    authenticator.clearCachedToken()
+                    if (attempt >= maxAttempts) break
+                } catch (e: Exception) {
+                    FileLogger.e(TAG, "Unexpected exception on attempt $attempt for ${metadata.title}: ${e.message}", e)
+                    break
+                }
+            }
 
             if (tempFile == null) {
-                vaultManager.writeErrorLog("Downloader", "Failed to download SSE stream for: ${metadata.title}")
+                FileLogger.e(TAG, "Sync process failed to download SSE stream after $attempt attempts for: ${metadata.title}")
                 return@withContext
             }
 
-            // Step d) Version raw SSE via VaultManager
+            // Step c) Version raw SSE via VaultManager
             val sseFile = vaultManager.processNewSseFile(tempFile, metadata.artist, metadata.album, metadata.title)
-
-            // Step e) Parsing, saving files, writing metadata.json, and updating Room DB
             val parsedVaultDir = vaultManager.getSongParsedVaultDir(metadata.artist, metadata.album, metadata.title)
-            vaultManager.writeMetadataJson(parsedVaultDir, metadata)
 
-            val parsedLyricsList = if (sseFile != null && sseFile.exists()) {
+            // SQLite Foreign Key crash prevention using ensure methods
+            val artistId = ensureArtist(dao, metadata.artist, metadata.artistBrowseId)
+            val albumName = metadata.album.ifBlank { "Unknown Album" }
+            val albumId = ensureAlbum(dao, albumName, metadata.albumBrowseId, artistId)
+
+            if (sseFile == null) {
+                // Duplicate SSE hash detected: processNewSseFile already updated last_checked in metadata.json & changelog.json
+                FileLogger.d(TAG, "Duplicate SSE stream detected for: ${metadata.title}. Updated last_checked.")
+                
+                // Keep Room DB lastCheckedAt up-to-date
+                val songInDb = dao.getSongByVideoId(metadata.videoId)
+                    ?: dao.getSongByTitleAndAlbum(metadata.title, albumId)
+                if (songInDb != null) {
+                    dao.updateSongCheckStatus(songInDb.id, System.currentTimeMillis(), songInDb.hasLyricsAvailable)
+                } else {
+                    ensureSong(dao, metadata.title, metadata.videoId, albumId, metadata.durationSeconds, false)
+                }
+                return@withContext
+            }
+
+            // Step d) Parse new SSE file, save formatted lyrics & metadata.json
+            val parsedLyricsList = if (sseFile.exists()) {
                 val parser = SseParser()
                 parser.parse(sseFile)
             } else {
@@ -96,37 +131,26 @@ object LyricsSyncManager {
                 lyricFile.writeText(lyric.lyricsText)
             }
 
+            // Write metadata.json with last_checked, last_updated, and parsed lyrics array
+            val now = System.currentTimeMillis()
+            vaultManager.writeMetadataJson(
+                parsedVaultDir = parsedVaultDir,
+                metadata = metadata,
+                parsedLyricsList = parsedLyricsList,
+                lastChecked = now,
+                lastUpdated = now
+            )
+
             // Room Database update
-            val existingArtist = dao.getArtistByName(metadata.artist)
-            val artistId = existingArtist?.id ?: dao.insertArtist(
-                ArtistEntity(name = metadata.artist, youtubeArtistId = metadata.artistBrowseId)
-            ).toInt()
-
-            val albumName = metadata.album.ifBlank { "Unknown Album" }
-            val existingAlbum = dao.getAlbumByNameAndArtist(albumName, artistId)
-            val albumId = existingAlbum?.id ?: dao.insertAlbum(
-                AlbumEntity(name = albumName, youtubeAlbumId = metadata.albumBrowseId, artistId = artistId)
-            ).toInt()
-
-            val songInDb = dao.getSongByVideoId(metadata.videoId)
-                ?: dao.getSongByTitleAndAlbum(metadata.title, albumId)
-
             val hasLyrics = parsedLyricsList.isNotEmpty()
-            val songId = if (songInDb == null) {
-                dao.insertSong(
-                    SongEntity(
-                        title = metadata.title,
-                        durationSeconds = metadata.durationSeconds,
-                        youtubeVideoId = metadata.videoId,
-                        albumId = albumId,
-                        hasLyricsAvailable = hasLyrics,
-                        lastCheckedAt = System.currentTimeMillis()
-                    )
-                ).toInt()
-            } else {
-                dao.updateSongCheckStatus(songInDb.id, System.currentTimeMillis(), hasLyrics)
-                songInDb.id
-            }
+            val songId = ensureSong(
+                dao = dao,
+                title = metadata.title,
+                videoId = metadata.videoId,
+                albumId = albumId,
+                durationSeconds = metadata.durationSeconds,
+                hasLyrics = hasLyrics
+            )
 
             if (parsedLyricsList.isNotEmpty()) {
                 dao.deleteFilesForSong(songId)
@@ -144,10 +168,78 @@ object LyricsSyncManager {
                 }
             }
 
-            Timber.tag(TAG).d("Successfully archived lyrics and metadata for: ${metadata.title}")
+            FileLogger.d(TAG, "Successfully archived lyrics and metadata for: ${metadata.title}")
         } catch (e: Exception) {
-            Timber.tag(TAG).e(e, "Error in syncLyrics pipeline for ${metadata.title}")
-            vaultManager.writeErrorLog("Pipeline", "Exception: ${e.message}")
+            FileLogger.e(TAG, "Error in syncLyrics pipeline for ${metadata.title}", e)
         }
     }
+
+    private suspend fun ensureArtist(dao: LibraryDao, artistName: String, browseId: String?): Int {
+        val existing = dao.getArtistByName(artistName)
+        if (existing != null) return existing.id
+
+        val insertedId = dao.insertArtist(
+            ArtistEntity(name = artistName, youtubeArtistId = browseId)
+        ).toInt()
+
+        if (insertedId != -1) return insertedId
+
+        return dao.getArtistByName(artistName)?.id
+            ?: error("Failed to ensure artist for: $artistName")
+    }
+
+    private suspend fun ensureAlbum(dao: LibraryDao, albumName: String, browseId: String?, artistId: Int): Int {
+        val existing = dao.getAlbumByNameAndArtist(albumName, artistId)
+        if (existing != null) return existing.id
+
+        val insertedId = dao.insertAlbum(
+            AlbumEntity(name = albumName, youtubeAlbumId = browseId, artistId = artistId)
+        ).toInt()
+
+        if (insertedId != -1) return insertedId
+
+        return dao.getAlbumByNameAndArtist(albumName, artistId)?.id
+            ?: error("Failed to ensure album for: $albumName")
+    }
+
+    private suspend fun ensureSong(
+        dao: LibraryDao,
+        title: String,
+        videoId: String?,
+        albumId: Int,
+        durationSeconds: Int,
+        hasLyrics: Boolean
+    ): Int {
+        val existingSong = (if (!videoId.isNullOrEmpty()) dao.getSongByVideoId(videoId) else null)
+            ?: dao.getSongByTitleAndAlbum(title, albumId)
+
+        if (existingSong != null) {
+            dao.updateSongCheckStatus(existingSong.id, System.currentTimeMillis(), hasLyrics)
+            return existingSong.id
+        }
+
+        val insertedId = dao.insertSong(
+            SongEntity(
+                title = title,
+                durationSeconds = durationSeconds,
+                youtubeVideoId = videoId,
+                albumId = albumId,
+                hasLyricsAvailable = hasLyrics,
+                lastCheckedAt = System.currentTimeMillis()
+            )
+        ).toInt()
+
+        if (insertedId != -1) return insertedId
+
+        val requeriedSong = (if (!videoId.isNullOrEmpty()) dao.getSongByVideoId(videoId) else null)
+            ?: dao.getSongByTitleAndAlbum(title, albumId)
+
+        if (requeriedSong != null) {
+            dao.updateSongCheckStatus(requeriedSong.id, System.currentTimeMillis(), hasLyrics)
+            return requeriedSong.id
+        }
+
+        error("Failed to ensure song for: $title")
+    }
 }
+

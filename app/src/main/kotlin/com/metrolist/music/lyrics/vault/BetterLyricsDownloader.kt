@@ -63,7 +63,7 @@ object BetterLyricsDownloader {
                 tempFile
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            FileLogger.e("BetterLyricsDownloader", "Failed to download SSE stream for $songTitle ($videoId)", e)
             null
         }
     }

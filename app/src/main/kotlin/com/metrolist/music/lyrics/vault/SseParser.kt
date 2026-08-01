@@ -163,7 +163,7 @@ class SseParser {
                         }
                     }
                 } catch (e: Exception) {
-                    e.printStackTrace()
+                    FileLogger.e("SseParser", "Error parsing SSE event data", e)
                 }
             } else if (line.trim().isEmpty()) {
                 isProviderEvent = false

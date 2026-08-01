@@ -10,20 +10,38 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 
+class TurnstileTimeout(message: String) : Exception(message)
+class TurnstileVerificationFailed(message: String) : Exception(message)
+
 class TurnstileAuthenticator(private val context: Context) {
     
     private val client = OkHttpClient()
+    private val prefs = context.getSharedPreferences("turnstile_prefs", Context.MODE_PRIVATE)
+
+    fun getCachedToken(): String? {
+        return prefs.getString("cached_token", null)?.takeIf { it.isNotBlank() }
+    }
+
+    fun saveCachedToken(token: String) {
+        prefs.edit().putString("cached_token", token).apply()
+    }
+
+    fun clearCachedToken() {
+        prefs.edit().remove("cached_token").apply()
+    }
     
     @SuppressLint("SetJavaScriptEnabled")
-    fun getTurnstileToken(): Flow<String> = callbackFlow {
+    fun getTurnstileTokenFromWebView(): Flow<String> = callbackFlow {
         var webView: WebView? = null
         
         withContext(Dispatchers.Main) {
@@ -44,7 +62,7 @@ class TurnstileAuthenticator(private val context: Context) {
                                 }
                             }
                         } catch (e: Exception) {
-                            e.printStackTrace()
+                            FileLogger.e("TurnstileAuthenticator", "Error in JS interface postMessage", e)
                         }
                     }
                 }, "AndroidInterface")
@@ -74,8 +92,24 @@ class TurnstileAuthenticator(private val context: Context) {
             }
         }
     }
+
+    suspend fun getTurnstileToken(forceRefresh: Boolean = false): String {
+        if (!forceRefresh) {
+            val cached = getCachedToken()
+            if (!cached.isNullOrEmpty()) {
+                return cached
+            }
+        }
+
+        val token = withTimeoutOrNull(30_000L) {
+            getTurnstileTokenFromWebView().first()
+        } ?: throw TurnstileTimeout("Failed to get Turnstile token within timeout")
+
+        saveCachedToken(token)
+        return token
+    }
     
-    suspend fun verifyToken(token: String): String? = withContext(Dispatchers.IO) {
+    suspend fun verifyToken(token: String): String = withContext(Dispatchers.IO) {
         try {
             val json = JSONObject().apply {
                 put("token", token)
@@ -88,16 +122,21 @@ class TurnstileAuthenticator(private val context: Context) {
                 
             client.newCall(request).execute().use { response ->
                 if (response.isSuccessful) {
-                    val body = response.body?.string() ?: return@use null
+                    val body = response.body?.string()
+                        ?: throw TurnstileVerificationFailed("Empty body returned from turnstile verification")
                     val resJson = JSONObject(body)
-                    resJson.optString("jwt").takeIf { it.isNotEmpty() }
+                    val jwt = resJson.optString("jwt").takeIf { it.isNotEmpty() }
+                    jwt ?: throw TurnstileVerificationFailed("JWT missing in turnstile verification response")
                 } else {
-                    null
+                    throw TurnstileVerificationFailed("Turnstile verification HTTP error: ${response.code}")
                 }
             }
+        } catch (e: TurnstileVerificationFailed) {
+            throw e
         } catch (e: Exception) {
-            e.printStackTrace()
-            null
+            FileLogger.e("TurnstileAuthenticator", "Turnstile verification failed with exception", e)
+            throw TurnstileVerificationFailed("Turnstile token verification failed: ${e.message}")
         }
     }
 }
+
