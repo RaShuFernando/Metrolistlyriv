@@ -2,6 +2,8 @@ package com.metrolist.music.lyrics.overlay
 
 import android.content.Context
 import android.util.LruCache
+import android.util.Log
+import android.net.Uri
 import com.metrolist.music.lyrics.LyricsEntry
 import com.metrolist.music.lyrics.LyricsUtils
 import com.metrolist.music.lyrics.vault.DatabaseProvider
@@ -87,26 +89,58 @@ object OverlayLyricsEngine {
     }
 
     suspend fun loadDirectLyricFile(
+        context: Context,
         videoId: String,
         folderPath: String,
         activeLyricFile: String
     ): ParsedOverlayLyrics? = withContext(Dispatchers.IO) {
+        val path = if (activeLyricFile.startsWith("content://") || activeLyricFile.startsWith("/")) {
+            activeLyricFile
+        } else if (folderPath.startsWith("content://")) {
+            if (folderPath.endsWith("/")) "$folderPath$activeLyricFile" else "$folderPath/$activeLyricFile"
+        } else {
+            File(folderPath, activeLyricFile).absolutePath
+        }
+
+        Log.e("LyricsEngine", "Attempting to load lyrics from: $path")
         try {
-            val file = File(folderPath, activeLyricFile)
-            if (!file.exists()) return@withContext null
-            val text = file.readText()
+            val text = if (path.startsWith("content://")) {
+                Log.e("LyricsEngine", "Resolution method: URI")
+                context.applicationContext.contentResolver.openInputStream(Uri.parse(path))?.use {
+                    it.bufferedReader().readText()
+                } ?: run {
+                    Log.e("LyricsEngine", "Failed to open InputStream for URI")
+                    return@withContext null
+                }
+            } else {
+                Log.e("LyricsEngine", "Resolution method: File")
+                val file = File(path)
+                if (!file.exists()) {
+                    Log.e("LyricsEngine", "File does not exist: $path")
+                    return@withContext null
+                }
+                file.readText()
+            }
+
             val entries = LyricsUtils.parseLyrics(text)
-            if (entries.isEmpty()) return@withContext null
+            if (entries.isEmpty()) {
+                Log.e("LyricsEngine", "Parsed 0 lines, returning null")
+                return@withContext null
+            }
+
+            val lines = entries.toOverlayLyricLines()
+            Log.e("LyricsEngine", "Successfully parsed ${lines.size} lines")
 
             val parsedOverlayLyrics = ParsedOverlayLyrics(
                 videoId = videoId,
                 folderPath = folderPath,
                 filename = activeLyricFile,
-                lines = entries.toOverlayLyricLines()
+                lines = lines
             )
             lruCache.put(videoId, parsedOverlayLyrics)
             parsedOverlayLyrics
         } catch (e: Exception) {
+            Log.e("LyricsEngine", "Parser crashed: ${e.message}")
             null
         }
     }
@@ -132,28 +166,46 @@ object OverlayLyricsEngine {
         suspend fun tryLoadFromDb(): ParsedOverlayLyrics? {
             val index = dao.getSongIndexByVideoId(videoId)
             if (index != null && index.folderPath.isNotBlank()) {
-                val metadataFile = File(index.folderPath, "metadata.json")
+                var metadataContent: String? = null
+                val metadataPath = if (index.folderPath.startsWith("content://")) {
+                    if (index.folderPath.endsWith("/")) "${index.folderPath}metadata.json" else "${index.folderPath}/metadata.json"
+                } else {
+                    File(index.folderPath, "metadata.json").absolutePath
+                }
+
+                try {
+                    if (metadataPath.startsWith("content://")) {
+                        context.applicationContext.contentResolver.openInputStream(Uri.parse(metadataPath))?.use {
+                            metadataContent = it.bufferedReader().readText()
+                        }
+                    } else {
+                        val metadataFile = File(metadataPath)
+                        if (metadataFile.exists()) {
+                            metadataContent = metadataFile.readText()
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e("LyricsEngine", "Failed to read metadata: ${e.message}")
+                }
+
                 var resolvedActiveFile: String? = null
                 
-                if (metadataFile.exists()) {
+                if (metadataContent != null) {
                     try {
-                        val content = metadataFile.readText()
                         val metadata = VaultManager.jsonSerializer.decodeFromString(
                             com.metrolist.music.lyrics.vault.LyricMetadata.serializer(), 
-                            content
+                            metadataContent!!
                         )
                         
                         if (!metadata.active_lyric_file.isNullOrBlank()) {
-                            val testFile = File(index.folderPath, metadata.active_lyric_file)
-                            if (testFile.exists()) {
-                                resolvedActiveFile = metadata.active_lyric_file
-                            }
+                            resolvedActiveFile = metadata.active_lyric_file
                         }
                         
                         if (resolvedActiveFile == null) {
                             resolvedActiveFile = metadata.lyrics.minByOrNull { it.rank }?.filename
                         }
                     } catch (e: Exception) {
+                        Log.e("LyricsEngine", "Failed to parse metadata: ${e.message}")
                         resolvedActiveFile = index.activeLyricFile
                     }
                 } else {
@@ -161,7 +213,7 @@ object OverlayLyricsEngine {
                 }
 
                 if (!resolvedActiveFile.isNullOrBlank()) {
-                    return loadDirectLyricFile(videoId, index.folderPath, resolvedActiveFile)
+                    return loadDirectLyricFile(context, videoId, index.folderPath, resolvedActiveFile!!)
                 }
             }
             return null
