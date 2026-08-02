@@ -220,6 +220,7 @@ fun OverlayLyricsSettingsScreen(
 
                                                 // 1. Instantly update UI / LRU Cache
                                                 OverlayLyricsEngine.loadDirectLyricFile(
+                                                    context = context,
                                                     videoId = currentVideoId,
                                                     folderPath = dir.absolutePath,
                                                     activeLyricFile = version.filename
