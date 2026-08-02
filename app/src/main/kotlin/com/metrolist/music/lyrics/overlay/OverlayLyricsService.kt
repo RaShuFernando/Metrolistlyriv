@@ -222,7 +222,7 @@ class OverlayLyricsService : Service() {
                 val tickerState = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(currentPositionMs.value) }
                 androidx.compose.runtime.LaunchedEffect(isPlaying) {
                     if (isPlaying) {
-                        while (kotlinx.coroutines.isActive) {
+                        while (true) {
                             tickerState.value = currentPositionMs.value
                             kotlinx.coroutines.delay(50)
                         }
