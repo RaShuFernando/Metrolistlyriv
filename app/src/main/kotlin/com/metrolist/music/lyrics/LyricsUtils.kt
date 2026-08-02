@@ -472,8 +472,26 @@ object LyricsUtils {
     private fun parseQrcLyrics(lines: List<String>): List<LyricsEntry> {
         val result = mutableListOf<LyricsEntry>()
         var lastNonBgAgent: String? = null
+        
+        val rawText = lines.joinToString("\n").trim()
+        val actualLines = if (rawText.startsWith("<?xml") || rawText.startsWith("<QrcInfos>")) {
+            val lyricContentMatch = Regex("LyricContent=\"([^\"]+)\"").find(rawText)
+            val extracted = lyricContentMatch?.groupValues?.get(1) ?: ""
+            // Decode basic XML entities
+            extracted
+                .replace("&#10;", "\n")
+                .replace("&#13;", "\r")
+                .replace("&amp;", "&")
+                .replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replace("&quot;", "\"")
+                .replace("&apos;", "'")
+                .lines()
+        } else {
+            lines
+        }
 
-        lines.forEachIndexed { _, line ->
+        actualLines.forEachIndexed { _, line ->
             val trimmedLine = line.trim()
             val matchResult = QRC_LINE_REGEX.matchEntire(trimmedLine)
             
