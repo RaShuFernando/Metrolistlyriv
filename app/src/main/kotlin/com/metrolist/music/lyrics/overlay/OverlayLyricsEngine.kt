@@ -6,6 +6,7 @@ import com.metrolist.music.lyrics.LyricsEntry
 import com.metrolist.music.lyrics.LyricsUtils
 import com.metrolist.music.lyrics.vault.DatabaseProvider
 import com.metrolist.music.lyrics.vault.LyricsSyncManager
+import com.metrolist.music.lyrics.vault.VaultManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
