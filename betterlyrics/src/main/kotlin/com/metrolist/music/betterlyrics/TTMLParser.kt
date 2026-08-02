@@ -111,7 +111,32 @@ object TTMLParser {
                 }
                 
                 val rawText = plainTextBuilder.toString().trim()
-                val finalText = if (rawText.isEmpty()) pContent.replace(Regex("<[^>]+>"), "").trim() else rawText
+                var finalText = if (rawText.isEmpty()) pContent.replace(Regex("<[^>]+>"), "").trim() else rawText
+
+                if (parsedWords.isEmpty()) {
+                    val pEnd = pMatch.groupValues[2]
+                    val rawFallback = pContent.replace(Regex("<[^>]+>"), "").trim()
+                        .replace("&#10;", "\n")
+                        .replace("&#13;", "\r")
+                        .replace("&amp;", "&")
+                        .replace("&lt;", "<")
+                        .replace("&gt;", ">")
+                        .replace("&quot;", "\"")
+                        .replace("&apos;", "'")
+
+                    if (rawFallback.isNotEmpty()) {
+                        val pEndMs = (parseTime(pEnd) * 1000).toLong()
+                        parsedWords.add(
+                            ParsedWord(
+                                text = rawFallback,
+                                startTime = lineStartMs / 1000.0,
+                                endTime = pEndMs / 1000.0,
+                                hasTrailingSpace = false
+                            )
+                        )
+                        finalText = rawFallback
+                    }
+                }
 
                 if (finalText.isNotEmpty() || parsedWords.isNotEmpty()) {
                     lines.add(
@@ -405,22 +430,26 @@ object TTMLParser {
 
     private fun parseTime(time: String): Double {
         val t = time.trim()
-        val c1 = t.indexOf(':')
-        if (c1 != -1) {
-            val c2 = t.lastIndexOf(':')
-            return if (c1 == c2) {
-                (t.substring(0, c1).toIntOrNull() ?: 0) * 60.0 + (t.substring(c1 + 1).toDoubleOrNull() ?: 0.0)
-            } else {
-                (t.substring(0, c1).toIntOrNull() ?: 0) * 3600.0 + (t.substring(c1 + 1, c2).toIntOrNull() ?: 0) * 60.0 + (t.substring(c2 + 1).toDoubleOrNull() ?: 0.0)
+        val parts = t.split(":")
+        
+        return when (parts.size) {
+            3 -> {
+                val h = parts[0].toIntOrNull() ?: 0
+                val m = parts[1].toIntOrNull() ?: 0
+                val s = parts[2].toDoubleOrNull() ?: 0.0
+                (h * 3600) + (m * 60) + s
             }
-        }
-        if (t.endsWith("ms")) return (t.substring(0, t.length - 2).toDoubleOrNull() ?: 0.0) / 1000.0
-        val s = if (t.endsWith("s") || t.endsWith("m") || t.endsWith("h")) t.substring(0, t.length - 1) else t
-        val v = s.toDoubleOrNull() ?: 0.0
-        return when {
-            t.endsWith("m") -> v * 60.0
-            t.endsWith("h") -> v * 3600.0
-            else -> v
+            2 -> {
+                val m = parts[0].toIntOrNull() ?: 0
+                val s = parts[1].toDoubleOrNull() ?: 0.0
+                (m * 60) + s
+            }
+            else -> {
+                var sStr = t
+                if (sStr.endsWith("ms")) return (sStr.substring(0, sStr.length - 2).toDoubleOrNull() ?: 0.0) / 1000.0
+                if (sStr.endsWith("s")) sStr = sStr.substring(0, sStr.length - 1)
+                sStr.toDoubleOrNull() ?: 0.0
+            }
         }
     }
 }
