@@ -1,0 +1,12 @@
+package com.metrolist.music.lyrics.overlay
+
+import com.metrolist.music.lyrics.QrcParser
+
+object ParserFactory {
+    fun getParser(filename: String): LyricParser? {
+        return when {
+            filename.endsWith(".qrc", ignoreCase = true) || filename.endsWith(".qrcm", ignoreCase = true) -> QrcParser()
+            else -> null
+        }
+    }
+}

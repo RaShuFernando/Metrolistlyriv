@@ -1,23 +1,27 @@
 package com.metrolist.music.lyrics
 
-object QrcParser {
+import com.metrolist.music.lyrics.overlay.LyricParser
+import com.metrolist.music.lyrics.overlay.OverlayLyricLine
+import com.metrolist.music.lyrics.overlay.OverlayLyricWord
+
+class QrcParser : LyricParser {
     // Matches [line_start, duration] or standard [mm:ss.xx]
-    private val QRC_LINE_REGEX = "^\\[(\\d+),(\\d+)\\](.*)$".toRegex()
-    private val LRC_LINE_REGEX = "^\\[(\\d{1,2}):(\\d{2})\\.(\\d{2,3})\\](.*)$".toRegex()
+    private val QRC_LINE_REGEX = Regex("""^\[(\d+),(\d+)\](.*)$""")
+    private val LRC_LINE_REGEX = Regex("""^\[(\d{1,2}):(\d{2})\.(\d{2,3})\](.*)$""")
     
     // Matches Word(start, duration) or Word((start,duration))
-    private val QRC_WORD_REGEX = "([^\\(]+)\\(\\(?(\\d+),(\\d+)\\)?\\)".toRegex()
+    private val QRC_WORD_REGEX = Regex("""([^\(]+)\(\(?(\d+),(\d+)\)?\)""")
 
-    private val AGENT_REGEX = "\\{agent:([^}]+)\\}".toRegex()
-    private val BACKGROUND_REGEX = "^\\{bg\\}".toRegex()
+    private val AGENT_REGEX = Regex("""\{agent:([^}]+)\}""")
+    private val BACKGROUND_REGEX = Regex("""^\{bg\}""")
 
-    fun parseQrcLyrics(lines: List<String>): List<LyricsEntry> {
-        val result = mutableListOf<LyricsEntry>()
+    override fun parse(rawText: String): List<OverlayLyricLine> {
+        val result = mutableListOf<OverlayLyricLine>()
         var lastNonBgAgent: String? = null
         
-        val rawText = lines.joinToString("\n").trim()
-        val actualLines = if (rawText.startsWith("<?xml") || rawText.startsWith("<QrcInfos>")) {
-            val lyricContentMatch = Regex("LyricContent=\"([^\"]+)\"").find(rawText)
+        val text = rawText.trim()
+        val actualLines = if (text.startsWith("<?xml") || text.startsWith("<QrcInfos>")) {
+            val lyricContentMatch = Regex("""LyricContent="([^"]+)"""").find(text)
             val extracted = lyricContentMatch?.groupValues?.get(1) ?: ""
             // Decode basic XML entities
             extracted
@@ -30,7 +34,7 @@ object QrcParser {
                 .replace("&apos;", "'")
                 .lines()
         } else {
-            lines
+            text.lines()
         }
 
         actualLines.forEach { line ->
@@ -38,12 +42,14 @@ object QrcParser {
             if (trimmedLine.isBlank()) return@forEach
             
             var lineStartMs = 0L
+            var lineDurationMs = 0L
             var content = trimmedLine
             var matchFound = false
 
             val qrcMatch = QRC_LINE_REGEX.matchEntire(trimmedLine)
             if (qrcMatch != null) {
                 lineStartMs = qrcMatch.groupValues[1].toLongOrNull() ?: 0L
+                lineDurationMs = qrcMatch.groupValues[2].toLongOrNull() ?: 0L
                 content = qrcMatch.groupValues[3].trimStart()
                 matchFound = true
             } else {
@@ -74,7 +80,7 @@ object QrcParser {
                 }
 
                 val wordMatches = QRC_WORD_REGEX.findAll(content).toList()
-                val wordTimings = mutableListOf<WordTimestamp>()
+                val overlayWords = mutableListOf<OverlayLyricWord>()
                 val plainTextBuilder = StringBuilder()
 
                 if (wordMatches.isNotEmpty()) {
@@ -84,19 +90,20 @@ object QrcParser {
                         val wordOffset = match.groupValues[2].toLongOrNull() ?: 0L
                         val wordDuration = match.groupValues[3].toLongOrNull() ?: 0L
                         
-                        val absoluteStartTime = wordOffset / 1000.0
-                        // Calculate endTimeMs = start_ms + duration
-                        val absoluteEndTime = absoluteStartTime + (wordDuration / 1000.0)
+                        val absoluteStartTimeMs = wordOffset
+                        val absoluteEndTimeMs = absoluteStartTimeMs + wordDuration
                         
-                        wordTimings.add(
-                            WordTimestamp(
-                                text = wordText,
-                                startTime = absoluteStartTime,
-                                endTime = absoluteEndTime,
-                                hasTrailingSpace = false,
-                                isBackground = isBackground
+                        if (wordText.isNotBlank()) {
+                            overlayWords.add(
+                                OverlayLyricWord(
+                                    text = wordText,
+                                    startTimeMs = absoluteStartTimeMs,
+                                    endTimeMs = absoluteEndTimeMs,
+                                    hasTrailingSpace = false, // QRC typically doesn't need this, or it includes spaces
+                                    isBackground = isBackground
+                                )
                             )
-                        )
+                        }
                         plainTextBuilder.append(wordText)
                     }
                 } else {
@@ -104,15 +111,24 @@ object QrcParser {
                 }
 
                 val plainText = plainTextBuilder.toString().trim()
+                if (plainText.isBlank()) return@forEach
+
                 if (!isBackground && !agent.isNullOrBlank()) {
                     lastNonBgAgent = agent
                 }
 
+                val endTimeMs = if (overlayWords.isNotEmpty()) {
+                    overlayWords.last().endTimeMs
+                } else {
+                    if (lineDurationMs > 0) lineStartMs + lineDurationMs else lineStartMs + 5000L
+                }
+
                 result.add(
-                    LyricsEntry(
-                        time = lineStartMs,
+                    OverlayLyricLine(
                         text = plainText,
-                        words = if (wordTimings.isNotEmpty()) wordTimings else null,
+                        startTimeMs = lineStartMs,
+                        endTimeMs = endTimeMs,
+                        words = overlayWords,
                         agent = if (isBackground) lastNonBgAgent ?: "bg" else agent,
                         isBackground = isBackground
                     )
@@ -120,6 +136,6 @@ object QrcParser {
             }
         }
         
-        return result.sorted()
+        return result.sortedBy { it.startTimeMs }
     }
 }

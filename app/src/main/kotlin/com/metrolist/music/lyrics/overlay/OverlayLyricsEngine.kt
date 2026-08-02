@@ -16,6 +16,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 
+import com.metrolist.music.lyrics.overlay.ParserFactory
+
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
@@ -124,13 +126,23 @@ object OverlayLyricsEngine {
                 file.readText()
             }
 
-            val entries = LyricsUtils.parseLyrics(text)
-            if (entries.isEmpty()) {
+            val parser = ParserFactory.getParser(activeLyricFile)
+            val lines = if (parser != null) {
+                parser.parse(text)
+            } else {
+                val entries = LyricsUtils.parseLyrics(text)
+                if (entries.isEmpty()) {
+                    Log.e("LyricsEngine", "Parsed 0 lines, returning null")
+                    return@withContext null
+                }
+                entries.toOverlayLyricLines()
+            }
+
+            if (lines.isEmpty()) {
                 Log.e("LyricsEngine", "Parsed 0 lines, returning null")
                 return@withContext null
             }
 
-            val lines = entries.toOverlayLyricLines()
             Log.e("LyricsEngine", "Successfully parsed ${lines.size} lines")
 
             val parsedOverlayLyrics = ParsedOverlayLyrics(
