@@ -130,7 +130,7 @@ object OverlayLyricsEngine {
         val dao = DatabaseProvider.getDatabase(context, masterPath).libraryDao()
         
         suspend fun tryLoadFromDb(): ParsedOverlayLyrics? {
-            val index = dao.getSongByVideoId(videoId)
+            val index = dao.getSongIndexByVideoId(videoId)
             if (index != null && index.folderPath.isNotBlank()) {
                 val metadataFile = File(index.folderPath, "metadata.json")
                 var resolvedActiveFile: String? = null
