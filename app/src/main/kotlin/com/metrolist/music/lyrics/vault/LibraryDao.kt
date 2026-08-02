@@ -65,8 +65,7 @@ interface LibraryDao {
     @Query("SELECT * FROM song_index WHERE title = :title AND artist = :artist LIMIT 1")
     suspend fun getSongIndexByTitleAndArtist(title: String, artist: String): SongIndexEntity?
 
-    @Query("SELECT * FROM song_index WHERE videoId = :videoId LIMIT 1")
-    fun observeSongIndexByVideoId(videoId: String): Flow<SongIndexEntity?>
+
 
     @Query("UPDATE song_index SET activeLyricFile = :activeLyricFile WHERE videoId = :videoId")
     suspend fun updateActiveLyricFile(videoId: String, activeLyricFile: String)
