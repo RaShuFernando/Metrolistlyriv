@@ -505,7 +505,7 @@ object LyricsUtils {
                         val wordOffset = match.groupValues[2].toLongOrNull() ?: 0L
                         val wordDuration = match.groupValues[3].toLongOrNull() ?: 0L
                         
-                        val absoluteStartTime = (lineStartMs + wordOffset) / 1000.0
+                        val absoluteStartTime = wordOffset / 1000.0
                         val absoluteEndTime = absoluteStartTime + (wordDuration / 1000.0)
                         
                         wordTimings.add(

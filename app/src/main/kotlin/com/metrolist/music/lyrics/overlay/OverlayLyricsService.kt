@@ -216,7 +216,7 @@ class OverlayLyricsService : Service() {
 
             setContent {
                 val uiState by currentUiState.collectAsState()
-                val positionMs by currentPositionMs.collectAsState()
+                val currentPositionProvider = { currentPositionMs.value }
                 val isPlaying by isPlaying.collectAsState()
                 val fontSizeSp by OverlayLyricsPreferences.getOverlayFontSize(this@OverlayLyricsService)
                     .collectAsState(initial = 18f)
@@ -235,7 +235,7 @@ class OverlayLyricsService : Service() {
                             if (lyrics.lines.isNotEmpty()) {
                                 OverlayLyricsView(
                                     overlayLyrics = lyrics,
-                                    positionMs = positionMs,
+                                    currentPositionProvider = currentPositionProvider,
                                     fontSizeSp = fontSizeSp
                                 )
                             }
@@ -336,14 +336,17 @@ class OverlayLyricsService : Service() {
 @Composable
 fun OverlayLyricsView(
     overlayLyrics: ParsedOverlayLyrics,
-    positionMs: Long,
+    currentPositionProvider: () -> Long,
     fontSizeSp: Float
 ) {
-    val activeLines = remember(overlayLyrics.lines, positionMs) {
-        val lines = overlayLyrics.lines
-        if (lines.isEmpty()) emptyList()
-        else {
-            lines.filter { positionMs in it.startTimeMs..it.endTimeMs }
+    val activeLines by androidx.compose.runtime.remember(overlayLyrics.lines) {
+        androidx.compose.runtime.derivedStateOf {
+            val positionMs = currentPositionProvider()
+            val lines = overlayLyrics.lines
+            if (lines.isEmpty()) emptyList()
+            else {
+                lines.filter { positionMs in it.startTimeMs..it.endTimeMs }
+            }
         }
     }
 
@@ -364,7 +367,7 @@ fun OverlayLyricsView(
                     if (hasWordTimestamps) {
                         WordSyncedLyricLine(
                             line = line,
-                            positionMs = positionMs,
+                            currentPositionProvider = currentPositionProvider,
                             fontSizeSp = fontSizeSp
                         )
                     } else {
@@ -397,7 +400,7 @@ fun OverlayLyricsView(
 @Composable
 fun WordSyncedLyricLine(
     line: OverlayLyricLine,
-    positionMs: Long,
+    currentPositionProvider: () -> Long,
     fontSizeSp: Float
 ) {
     val words = line.words
@@ -412,8 +415,8 @@ fun WordSyncedLyricLine(
         horizontalArrangement = if (textAlign == TextAlign.Right) Arrangement.End else Arrangement.Center
     ) {
         words.forEach { word ->
-            val isActive = positionMs >= word.startTimeMs && positionMs <= word.endTimeMs
-            val isPassed = positionMs > word.endTimeMs
+            val isActive by androidx.compose.runtime.remember { androidx.compose.runtime.derivedStateOf { currentPositionProvider() >= word.startTimeMs && currentPositionProvider() <= word.endTimeMs } }
+            val isPassed by androidx.compose.runtime.remember { androidx.compose.runtime.derivedStateOf { currentPositionProvider() > word.endTimeMs } }
 
             val scale by animateFloatAsState(targetValue = if (isActive) 1.1f else 1.0f, label = "ScaleAnim")
             val color by animateColorAsState(

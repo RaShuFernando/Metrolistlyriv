@@ -76,42 +76,57 @@ object TTMLParser {
     fun parseTTML(ttml: String): List<ParsedLine> {
         val lines = mutableListOf<ParsedLine>()
         try {
-            val factory = DocumentBuilderFactory.newInstance()
-            factory.isNamespaceAware = true
-            
-            // On Android, some features might not be supported and throw ParserConfigurationException
-            try { factory.setFeature("http://xml.org/sax/features/external-general-entities", false) } catch (e: Exception) {}
-            try { factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false) } catch (e: Exception) {}
-            try { factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false) } catch (e: Exception) {}
-            try { factory.setXIncludeAware(false) } catch (e: Exception) {}
-            try { factory.isExpandEntityReferences = false } catch (e: Exception) {}
-            
-            val builder = factory.newDocumentBuilder()
-            val doc = builder.parse(ttml.byteInputStream())
-            val root = doc.documentElement
+            // Highly permissive Regex parser to bypass XML namespace crashes
+            val pRegex = "<(?:[a-zA-Z0-9]+:)?p[^>]*begin=\"([^\"]+)\"[^>]*end=\"([^\"]+)\"[^>]*>(.*?)</(?:[a-zA-Z0-9]+:)?p>".toRegex(RegexOption.DOT_MATCHES_ALL)
+            val spanRegex = "<(?:[a-zA-Z0-9]+:)?span[^>]*begin=\"([^\"]+)\"[^>]*end=\"([^\"]+)\"[^>]*>(.*?)</(?:[a-zA-Z0-9]+:)?span>".toRegex(RegexOption.DOT_MATCHES_ALL)
 
-            var globalOffset = 0.0
-            // Manual search for head/metadata/audio to avoid getElementsByTagName
-            val head = findChild(root, "head")
-            if (head != null) {
-                val meta = findChild(head, "metadata")
-                if (meta != null) {
-                    val audio = findChild(meta, "audio")
-                    if (audio != null) {
-                        globalOffset = audio.getAttribute("lyricOffset").toDoubleOrNull() ?: 0.0
-                    }
+            pRegex.findAll(ttml).forEach { pMatch ->
+                val pBegin = pMatch.groupValues[1]
+                val pContent = pMatch.groupValues[3]
+                
+                // Multiply decimal seconds by 1000 and convert to Long, then back to Double for the struct
+                val lineStartMs = (parseTime(pBegin) * 1000).toLong()
+                val lineStartTime = lineStartMs / 1000.0
+                
+                val parsedWords = mutableListOf<ParsedWord>()
+                val plainTextBuilder = StringBuilder()
+                
+                spanRegex.findAll(pContent).forEach { spanMatch ->
+                    val spanBegin = spanMatch.groupValues[1]
+                    val spanEnd = spanMatch.groupValues[2]
+                    val spanText = spanMatch.groupValues[3].replace(Regex("<[^>]+>"), "").trim()
+                    
+                    val wStartMs = (parseTime(spanBegin) * 1000).toLong()
+                    val wEndMs = (parseTime(spanEnd) * 1000).toLong()
+                    
+                    parsedWords.add(
+                        ParsedWord(
+                            text = spanText,
+                            startTime = wStartMs / 1000.0,
+                            endTime = wEndMs / 1000.0,
+                            hasTrailingSpace = true
+                        )
+                    )
+                    plainTextBuilder.append(spanText).append(" ")
+                }
+                
+                val rawText = plainTextBuilder.toString().trim()
+                val finalText = if (rawText.isEmpty()) pContent.replace(Regex("<[^>]+>"), "").trim() else rawText
+
+                if (finalText.isNotEmpty() || parsedWords.isNotEmpty()) {
+                    lines.add(
+                        ParsedLine(
+                            text = finalText,
+                            startTime = lineStartTime,
+                            words = parsedWords
+                        )
+                    )
                 }
             }
-
-            val body = findChild(root, "body")
-            if (body != null) {
-                walk(body, lines, globalOffset, null)
-            }
         } catch (e: Exception) {
-            Timber.e(e, "TTMLParser.parseTTML: Failed to parse TTML")
-            return emptyList()
+            Timber.e(e, "TTMLParser.parseTTML: Failed to parse TTML with Regex")
         }
-        return lines
+        return lines.sortedBy { it.startTime }
     }
 
     private fun findChild(parent: Element, localName: String): Element? {
