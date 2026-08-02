@@ -23,7 +23,8 @@ data class OverlayLyricWord(
     val text: String,
     val startTimeMs: Long,
     val endTimeMs: Long,
-    val hasTrailingSpace: Boolean
+    val hasTrailingSpace: Boolean,
+    val isBackground: Boolean = false
 )
 
 data class OverlayLyricLine(
@@ -49,7 +50,8 @@ fun List<LyricsEntry>.toOverlayLyricLines(): List<OverlayLyricLine> {
                 text = word.text,
                 startTimeMs = (word.startTime * 1000).toLong(),
                 endTimeMs = (word.endTime * 1000).toLong(),
-                hasTrailingSpace = word.hasTrailingSpace
+                hasTrailingSpace = word.hasTrailingSpace,
+                isBackground = word.isBackground
             )
         } ?: emptyList()
 

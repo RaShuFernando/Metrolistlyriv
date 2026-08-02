@@ -11,7 +11,8 @@ data class WordTimestamp(
     val text: String,
     val startTime: Double,
     val endTime: Double,
-    val hasTrailingSpace: Boolean = true
+    val hasTrailingSpace: Boolean = true,
+    val isBackground: Boolean = false
 )
 
 data class LyricsEntry(

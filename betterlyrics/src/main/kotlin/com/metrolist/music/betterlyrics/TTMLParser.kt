@@ -23,14 +23,16 @@ object TTMLParser {
         val text: String,
         val startTime: Double,
         val endTime: Double,
-        val hasTrailingSpace: Boolean = true
+        val hasTrailingSpace: Boolean = true,
+        val isBackground: Boolean = false
     )
     
     private data class SpanInfo(
         val text: String,
         val startTime: Double,
         val endTime: Double,
-        val hasTrailingSpace: Boolean
+        val hasTrailingSpace: Boolean,
+        val isBackground: Boolean = false
     )
 
     private fun getAttr(el: Element, localName: String): String {
@@ -77,12 +79,24 @@ object TTMLParser {
         val lines = mutableListOf<ParsedLine>()
         try {
             // Highly permissive Regex parser to bypass XML namespace crashes
-            val pRegex = "<(?:[a-zA-Z0-9]+:)?p[^>]*begin=\"([^\"]+)\"[^>]*end=\"([^\"]+)\"[^>]*>(.*?)</(?:[a-zA-Z0-9]+:)?p>".toRegex(RegexOption.DOT_MATCHES_ALL)
-            val spanRegex = "<(?:[a-zA-Z0-9]+:)?span[^>]*begin=\"([^\"]+)\"[^>]*end=\"([^\"]+)\"[^>]*>(.*?)</(?:[a-zA-Z0-9]+:)?span>".toRegex(RegexOption.DOT_MATCHES_ALL)
+            val pRegex = "<(?:[a-zA-Z0-9]+:)?p([^>]*)>(.*?)</(?:[a-zA-Z0-9]+:)?p>".toRegex(RegexOption.DOT_MATCHES_ALL)
+            val spanRegex = "<(?:[a-zA-Z0-9]+:)?span([^>]*)>(.*?)</(?:[a-zA-Z0-9]+:)?span>".toRegex(RegexOption.DOT_MATCHES_ALL)
+            
+            val beginRegex = """(?:ttp:)?begin="([^"]+)"""".toRegex()
+            val endRegex = """(?:ttp:)?end="([^"]+)"""".toRegex()
+            val agentRegex = """(?:ttm:)?agent="([^"]+)"""".toRegex()
+            val roleRegex = """(?:ttm:)?role="([^"]+)"""".toRegex()
 
             pRegex.findAll(ttml).forEach { pMatch ->
-                val pBegin = pMatch.groupValues[1]
-                val pContent = pMatch.groupValues[3]
+                val pAttrs = pMatch.groupValues[1]
+                val pContent = pMatch.groupValues[2]
+                
+                val pBegin = beginRegex.find(pAttrs)?.groupValues?.get(1) ?: return@forEach
+                val pEnd = endRegex.find(pAttrs)?.groupValues?.get(1)
+                
+                val agent = agentRegex.find(pAttrs)?.groupValues?.get(1)
+                val pRole = roleRegex.find(pAttrs)?.groupValues?.get(1)
+                val isPBackground = pRole == "x-bg"
                 
                 // Multiply decimal seconds by 1000 and convert to Long, then back to Double for the struct
                 val lineStartMs = (parseTime(pBegin) * 1000).toLong()
@@ -92,9 +106,16 @@ object TTMLParser {
                 val plainTextBuilder = StringBuilder()
                 
                 spanRegex.findAll(pContent).forEach { spanMatch ->
-                    val spanBegin = spanMatch.groupValues[1]
-                    val spanEnd = spanMatch.groupValues[2]
-                    val spanText = spanMatch.groupValues[3].replace(Regex("<[^>]+>"), "").trim()
+                    val spanAttrs = spanMatch.groupValues[1]
+                    val spanContent = spanMatch.groupValues[2]
+                    
+                    val spanBegin = beginRegex.find(spanAttrs)?.groupValues?.get(1) ?: return@forEach
+                    val spanEnd = endRegex.find(spanAttrs)?.groupValues?.get(1) ?: return@forEach
+                    
+                    val spanRole = roleRegex.find(spanAttrs)?.groupValues?.get(1)
+                    val isSpanBackground = spanRole == "x-bg" || isPBackground
+                    
+                    val spanText = spanContent.replace(Regex("<[^>]+>"), "").trim()
                     
                     val wStartMs = (parseTime(spanBegin) * 1000).toLong()
                     val wEndMs = (parseTime(spanEnd) * 1000).toLong()
@@ -104,7 +125,8 @@ object TTMLParser {
                             text = spanText,
                             startTime = wStartMs / 1000.0,
                             endTime = wEndMs / 1000.0,
-                            hasTrailingSpace = true
+                            hasTrailingSpace = true,
+                            isBackground = isSpanBackground
                         )
                     )
                     plainTextBuilder.append(spanText).append(" ")
@@ -114,7 +136,6 @@ object TTMLParser {
                 var finalText = if (rawText.isEmpty()) pContent.replace(Regex("<[^>]+>"), "").trim() else rawText
 
                 if (parsedWords.isEmpty()) {
-                    val pEnd = pMatch.groupValues[2]
                     val rawFallback = pContent.replace(Regex("<[^>]+>"), "").trim()
                         .replace("&#10;", "\n")
                         .replace("&#13;", "\r")
@@ -125,13 +146,14 @@ object TTMLParser {
                         .replace("&apos;", "'")
 
                     if (rawFallback.isNotEmpty()) {
-                        val pEndMs = (parseTime(pEnd) * 1000).toLong()
+                        val pEndMs = if (pEnd != null) (parseTime(pEnd) * 1000).toLong() else lineStartMs + 5000L
                         parsedWords.add(
                             ParsedWord(
                                 text = rawFallback,
                                 startTime = lineStartMs / 1000.0,
                                 endTime = pEndMs / 1000.0,
-                                hasTrailingSpace = false
+                                hasTrailingSpace = false,
+                                isBackground = isPBackground
                             )
                         )
                         finalText = rawFallback
@@ -143,7 +165,9 @@ object TTMLParser {
                         ParsedLine(
                             text = finalText,
                             startTime = lineStartTime,
-                            words = parsedWords
+                            words = parsedWords,
+                            agent = agent,
+                            isBackground = isPBackground
                         )
                     )
                 }

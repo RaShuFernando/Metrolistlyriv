@@ -73,6 +73,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.flatMapLatest
 import androidx.compose.runtime.getValue
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -305,24 +306,21 @@ class OverlayLyricsService : Service() {
 
     private fun observeTrackChanges() {
         serviceScope.launch {
-            currentVideoId.collectLatest { videoId ->
-                lyricsJob?.cancel()
+            currentVideoId.flatMapLatest { videoId ->
                 if (videoId.isBlank()) {
                     currentUiState.value = LyricsUiState.Hidden
-                    return@collectLatest
-                }
-
-                currentUiState.value = LyricsUiState.Loading
-
-                lyricsJob = launch {
+                    kotlinx.coroutines.flow.flowOf(null)
+                } else {
+                    currentUiState.value = LyricsUiState.Loading
                     OverlayLyricsEngine.observeLyricsForTrack(this@OverlayLyricsService, videoId)
-                        .collect { parsedLyrics ->
-                            if (parsedLyrics != null) {
-                                currentUiState.value = LyricsUiState.Success(parsedLyrics)
-                            } else {
-                                currentUiState.value = LyricsUiState.NotFound
-                            }
-                        }
+                }
+            }.collect { parsedLyrics ->
+                if (currentUiState.value != LyricsUiState.Hidden) {
+                    if (parsedLyrics != null) {
+                        currentUiState.value = LyricsUiState.Success(parsedLyrics)
+                    } else {
+                        currentUiState.value = LyricsUiState.NotFound
+                    }
                 }
             }
         }
@@ -383,16 +381,23 @@ fun OverlayLyricsView(
                             fontSizeSp = fontSizeSp
                         )
                     } else {
-                        val isBg = line.isBackground || (line.agent != null && line.agent != "v1")
-                        val textAlign = if (isBg) TextAlign.Right else TextAlign.Center
+                        val isBg = line.isBackground
+                        val textAlign = when {
+                            isBg -> TextAlign.Right
+                            line.agent == "v2" -> TextAlign.Right
+                            else -> TextAlign.Start
+                        }
                         val effectiveFontSize = if (isBg) fontSizeSp * 0.85f else fontSizeSp
+                        val baseColor = if (line.agent == "v2") Color(0xFF00E5FF) else Color.White
+                        val finalColor = if (isBg) baseColor.copy(alpha = 0.65f) else baseColor
 
                         Text(
                             text = line.text,
                             style = TextStyle(
                                 fontSize = effectiveFontSize.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.White,
+                                fontStyle = if (isBg) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal,
+                                color = finalColor,
                                 textAlign = textAlign,
                                 shadow = Shadow(
                                     color = Color.Black,
@@ -418,24 +423,32 @@ fun WordSyncedLyricLine(
     val words = line.words
 
     // Agent alignment logic
-    val isBg = line.isBackground || (line.agent != null && line.agent != "v1")
-    val textAlign = if (isBg) TextAlign.Right else TextAlign.Center
+    val isBg = line.isBackground
+    val textAlign = when {
+        isBg -> TextAlign.Right
+        line.agent == "v2" -> TextAlign.Right
+        else -> TextAlign.Start
+    }
     val effectiveFontSize = if (isBg) fontSizeSp * 0.85f else fontSizeSp
+    val baseColor = if (line.agent == "v2") Color(0xFF00E5FF) else Color.White
 
     androidx.compose.foundation.layout.FlowRow(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = if (textAlign == TextAlign.Right) Arrangement.End else Arrangement.Center
+        horizontalArrangement = if (textAlign == TextAlign.Right) Arrangement.End else Arrangement.Start
     ) {
         words.forEach { word ->
-            val isActive by androidx.compose.runtime.remember { androidx.compose.runtime.derivedStateOf { currentPositionProvider() >= word.startTimeMs && currentPositionProvider() <= word.endTimeMs } }
+            val isActive by androidx.compose.runtime.remember { androidx.compose.runtime.derivedStateOf { currentPositionProvider() in word.startTimeMs..word.endTimeMs } }
             val isPassed by androidx.compose.runtime.remember { androidx.compose.runtime.derivedStateOf { currentPositionProvider() > word.endTimeMs } }
 
             val scale by animateFloatAsState(targetValue = if (isActive) 1.1f else 1.0f, label = "ScaleAnim")
+            
+            val wordFontSize = if (word.isBackground) effectiveFontSize * 0.85f else effectiveFontSize
+            
             val color by animateColorAsState(
                 targetValue = when {
                     isActive -> Color(0xFFFFD700) // Vibrant Gold highlight
-                    isPassed -> Color.White
-                    else -> Color.White.copy(alpha = 0.6f)
+                    isPassed -> baseColor
+                    else -> baseColor.copy(alpha = if (word.isBackground || isBg) 0.65f else 0.6f)
                 },
                 label = "ColorAnim"
             )
@@ -444,8 +457,9 @@ fun WordSyncedLyricLine(
                 text = word.text + if (word.hasTrailingSpace) " " else "",
                 color = color,
                 style = TextStyle(
-                    fontSize = effectiveFontSize.sp,
+                    fontSize = wordFontSize.sp,
                     fontWeight = if (isActive) FontWeight.ExtraBold else FontWeight.Bold,
+                    fontStyle = if (word.isBackground || isBg) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal,
                     shadow = Shadow(
                         color = Color.Black,
                         offset = Offset(2f, 2f),
