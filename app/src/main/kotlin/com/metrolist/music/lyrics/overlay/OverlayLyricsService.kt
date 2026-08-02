@@ -66,6 +66,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import androidx.compose.runtime.getValue
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.pm.ServiceInfo
+import androidx.core.app.NotificationCompat
 
 class ServiceLifecycleOwner : LifecycleOwner, SavedStateRegistryOwner, ViewModelStoreOwner {
     val lifecycleRegistry = LifecycleRegistry(this)
@@ -83,6 +87,13 @@ class ServiceLifecycleOwner : LifecycleOwner, SavedStateRegistryOwner, ViewModel
     override val lifecycle: Lifecycle get() = lifecycleRegistry
     override val savedStateRegistry: SavedStateRegistry get() = savedStateRegistryController.savedStateRegistry
     override val viewModelStore: ViewModelStore get() = store
+}
+
+sealed class LyricsUiState {
+    object Hidden : LyricsUiState()
+    object Loading : LyricsUiState()
+    data class Success(val lyrics: ParsedOverlayLyrics) : LyricsUiState()
+    object NotFound : LyricsUiState()
 }
 
 class OverlayLyricsService : Service() {
@@ -134,13 +145,36 @@ class OverlayLyricsService : Service() {
     private val serviceScope = CoroutineScope(Dispatchers.Main + Job())
     private var lyricsJob: Job? = null
 
-    private val currentLyrics = MutableStateFlow<ParsedOverlayLyrics?>(null)
+    private val currentUiState = MutableStateFlow<LyricsUiState>(LyricsUiState.Hidden)
 
     override fun onCreate() {
         super.onCreate()
-        lifecycleOwner.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
-        lifecycleOwner.handleLifecycleEvent(Lifecycle.Event.ON_START)
-        lifecycleOwner.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
+        
+        // Start Foreground early to prevent ForegroundServiceDidNotStartInTimeException
+        val channelId = "overlay_lyrics_channel"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                channelId,
+                "Overlay Lyrics Active",
+                NotificationManager.IMPORTANCE_LOW
+            )
+            val manager = getSystemService(NotificationManager::class.java)
+            manager.createNotificationChannel(channel)
+        }
+        val notification = NotificationCompat.Builder(this, channelId)
+            .setContentTitle("Overlay Lyrics Active")
+            .setSmallIcon(android.R.drawable.ic_media_play)
+            .build()
+            
+        if (Build.VERSION.SDK_INT >= 34) {
+            startForeground(
+                12345, 
+                notification, 
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            )
+        } else {
+            startForeground(12345, notification)
+        }
 
         if (!Settings.canDrawOverlays(this)) {
             stopSelf()
@@ -173,26 +207,48 @@ class OverlayLyricsService : Service() {
             setViewTreeViewModelStoreOwner(lifecycleOwner)
 
             setContent {
-                val lyrics by currentLyrics.collectAsState()
+                val uiState by currentUiState.collectAsState()
                 val positionMs by currentPositionMs.collectAsState()
                 val fontSizeSp by OverlayLyricsPreferences.getOverlayFontSize(this@OverlayLyricsService)
                     .collectAsState(initial = 18f)
                 val enabled by OverlayLyricsPreferences.getOverlayEnabled(this@OverlayLyricsService)
                     .collectAsState(initial = true)
 
-                if (enabled && lyrics != null && lyrics!!.entries.isNotEmpty()) {
-                    OverlayLyricsView(
-                        overlayLyrics = lyrics!!,
-                        positionMs = positionMs,
-                        fontSizeSp = fontSizeSp
-                    )
+                if (enabled) {
+                    when (uiState) {
+                        is LyricsUiState.Success -> {
+                            val lyrics = (uiState as LyricsUiState.Success).lyrics
+                            if (lyrics.entries.isNotEmpty()) {
+                                OverlayLyricsView(
+                                    overlayLyrics = lyrics,
+                                    positionMs = positionMs,
+                                    fontSizeSp = fontSizeSp
+                                )
+                            }
+                        }
+                        is LyricsUiState.Loading -> {
+                            StatusOverlayView(
+                                text = "Searching for lyrics...",
+                                fontSizeSp = fontSizeSp
+                            )
+                        }
+                        is LyricsUiState.NotFound -> {
+                            StatusOverlayView(
+                                text = "No lyrics found",
+                                fontSizeSp = fontSizeSp
+                            )
+                        }
+                        is LyricsUiState.Hidden -> {}
+                    }
                 }
             }
         }
 
         try {
             windowManager?.addView(composeView, layoutParams)
-            lifecycleOwner.lifecycleRegistry.currentState = Lifecycle.State.RESUMED
+            lifecycleOwner.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
+            lifecycleOwner.handleLifecycleEvent(Lifecycle.Event.ON_START)
+            lifecycleOwner.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
         } catch (e: Exception) {
             stopSelf()
         }
@@ -203,14 +259,22 @@ class OverlayLyricsService : Service() {
             currentVideoId.collectLatest { videoId ->
                 lyricsJob?.cancel()
                 if (videoId.isBlank()) {
-                    currentLyrics.value = null
+                    currentUiState.value = LyricsUiState.Hidden
                     return@collectLatest
                 }
+
+                currentUiState.value = LyricsUiState.Loading
 
                 lyricsJob = launch {
                     OverlayLyricsEngine.observeLyricsForTrack(this@OverlayLyricsService, videoId)
                         .collect { parsedLyrics ->
-                            currentLyrics.value = parsedLyrics
+                            if (parsedLyrics != null) {
+                                currentUiState.value = LyricsUiState.Success(parsedLyrics)
+                            } else {
+                                currentUiState.value = LyricsUiState.NotFound
+                                kotlinx.coroutines.delay(3000)
+                                currentUiState.value = LyricsUiState.Hidden
+                            }
                         }
                 }
             }
@@ -255,8 +319,8 @@ fun OverlayLyricsView(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color.Transparent)
-            .padding(horizontal = 24.dp, vertical = 8.dp),
+            .background(Color(0x44000000))
+            .padding(16.dp),
         contentAlignment = Alignment.Center
     ) {
         AnimatedContent(
@@ -347,4 +411,31 @@ fun WordSyncedLyricLine(
         ),
         modifier = Modifier.fillMaxWidth()
     )
+}
+
+@Composable
+fun StatusOverlayView(text: String, fontSizeSp: Float) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0x44000000))
+            .padding(16.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            style = TextStyle(
+                fontSize = fontSizeSp.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                textAlign = TextAlign.Center,
+                shadow = Shadow(
+                    color = Color.Black,
+                    offset = Offset(2f, 2f),
+                    blurRadius = 8f
+                )
+            ),
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
 }

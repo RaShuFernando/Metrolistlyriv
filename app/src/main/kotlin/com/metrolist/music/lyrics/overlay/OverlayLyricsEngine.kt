@@ -110,7 +110,7 @@ object OverlayLyricsEngine {
                             }
                             
                             if (resolvedActiveFile == null) {
-                                resolvedActiveFile = com.metrolist.music.lyrics.vault.LyricsRanking.selectActiveLyricFile(metadata.lyrics)
+                                resolvedActiveFile = metadata.lyrics.minByOrNull { it.rank }?.filename
                             }
                         } catch (e: Exception) {
                             resolvedActiveFile = index.activeLyricFile
