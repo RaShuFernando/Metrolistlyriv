@@ -75,23 +75,31 @@ fun OverlayLyricsSettingsScreen(
     var activeFilename by remember { mutableStateOf<String?>(null) }
     var parsedVaultDir by remember { mutableStateOf<File?>(null) }
 
-    fun loadCurrentTrackMetadata() {
-        coroutineScope.launch(Dispatchers.IO) {
-            if (currentVideoId.isBlank()) return@launch
+    LaunchedEffect(currentVideoId) {
+        if (currentVideoId.isBlank()) {
+            availableVersions = emptyList()
+            activeFilename = null
+            parsedVaultDir = null
+            return@LaunchedEffect
+        }
+        
+        withContext(Dispatchers.IO) {
             val masterPath = LyricsSyncManager.getMasterFolderPath()
             val dao = DatabaseProvider.getDatabase(context, masterPath).libraryDao()
-            val index = dao.getSongIndexByVideoId(currentVideoId) ?: return@launch
+            val index = dao.getSongIndexByVideoId(currentVideoId) ?: return@withContext
             val dir = File(index.folderPath)
-            if (!dir.exists()) return@launch
-
-            parsedVaultDir = dir
-            activeFilename = index.activeLyricFile
+            if (!dir.exists()) return@withContext
 
             val vaultManager = VaultManager(masterPath)
             val metadata = vaultManager.readMetadataJson(dir)
-            if (metadata != null) {
-                withContext(Dispatchers.Main) {
+            
+            withContext(Dispatchers.Main) {
+                parsedVaultDir = dir
+                activeFilename = index.activeLyricFile
+                if (metadata != null) {
                     availableVersions = metadata.lyrics
+                } else {
+                    availableVersions = emptyList()
                 }
             }
         }
@@ -188,7 +196,6 @@ fun OverlayLyricsSettingsScreen(
                             if (currentVideoId.isBlank()) {
                                 Toast.makeText(context, context.getString(R.string.no_song_playing), Toast.LENGTH_SHORT).show()
                             } else {
-                                loadCurrentTrackMetadata()
                                 showVersionDialog = true
                             }
                         }

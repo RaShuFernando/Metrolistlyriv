@@ -148,23 +148,21 @@ object OverlayLyricsEngine {
     /**
      * Implements Data Fetching using reactive Flow without arbitrary timeouts.
      */
-    fun observeLyricsForTrack(context: Context, videoId: String): Flow<ParsedOverlayLyrics?> = flow {
+    fun observeLyricsForTrack(context: Context, videoId: String): Flow<ParsedOverlayLyrics?> {
         if (videoId.isBlank()) {
-            emit(null)
-            return@flow
-        }
-
-        val cached = lruCache.get(videoId)
-        if (cached != null) {
-            emit(cached)
-            return@flow
+            return kotlinx.coroutines.flow.flowOf(null)
         }
 
         val masterPath = LyricsSyncManager.getMasterFolderPath()
         val dao = DatabaseProvider.getDatabase(context, masterPath).libraryDao()
         
-        suspend fun tryLoadFromDb(): ParsedOverlayLyrics? {
-            val index = dao.getSongIndexByVideoId(videoId)
+        return kotlinx.coroutines.flow.combine(
+            dao.observeSongIndexByVideoId(videoId),
+            LyricsSyncManager.observeIsSyncing(videoId)
+        ) { index, isSyncing ->
+            
+            var parsed: ParsedOverlayLyrics? = null
+            
             if (index != null && index.folderPath.isNotBlank()) {
                 var metadataContent: String? = null
                 val metadataPath = if (index.folderPath.startsWith("content://")) {
@@ -213,30 +211,14 @@ object OverlayLyricsEngine {
                 }
 
                 if (!resolvedActiveFile.isNullOrBlank()) {
-                    return loadDirectLyricFile(context, videoId, index.folderPath, resolvedActiveFile!!)
+                    parsed = loadDirectLyricFile(context, videoId, index.folderPath, resolvedActiveFile!!)
                 }
             }
-            return null
-        }
-
-        // 1. Try immediate load
-        val immediate = tryLoadFromDb()
-        if (immediate != null) {
-            emit(immediate)
-            return@flow
-        }
-
-        // 2. Wait for sync to finish (if syncing)
-        val isSyncing = LyricsSyncManager.observeIsSyncing(videoId).first()
-        if (isSyncing) {
-            // Wait until isSyncing becomes false
-            LyricsSyncManager.observeIsSyncing(videoId).first { !it }
             
-            // Re-query database once
-            emit(tryLoadFromDb())
-        } else {
-            // Not syncing, and immediate was null. Emit null.
-            emit(null)
+            // If parsed is not null, it will emit the lyrics.
+            // If parsed is null and isSyncing is true, we emit null. The UI will show Loading/Fetching.
+            // If parsed is null and isSyncing is false, we emit null. The UI will eventually show NotFound.
+            parsed
         }
     }
 }
