@@ -15,12 +15,19 @@ import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -38,6 +45,7 @@ import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -209,13 +217,19 @@ class OverlayLyricsService : Service() {
             setContent {
                 val uiState by currentUiState.collectAsState()
                 val positionMs by currentPositionMs.collectAsState()
+                val isPlaying by isPlaying.collectAsState()
                 val fontSizeSp by OverlayLyricsPreferences.getOverlayFontSize(this@OverlayLyricsService)
                     .collectAsState(initial = 18f)
                 val enabled by OverlayLyricsPreferences.getOverlayEnabled(this@OverlayLyricsService)
                     .collectAsState(initial = true)
 
                 if (enabled) {
-                    when (uiState) {
+                    AnimatedVisibility(
+                        visible = isPlaying,
+                        enter = fadeIn(),
+                        exit = fadeOut()
+                    ) {
+                        when (uiState) {
                         is LyricsUiState.Success -> {
                             val lyrics = (uiState as LyricsUiState.Success).lyrics
                             if (lyrics.entries.isNotEmpty()) {
@@ -319,14 +333,14 @@ fun OverlayLyricsView(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color(0x44000000))
             .padding(16.dp),
         contentAlignment = Alignment.Center
     ) {
         AnimatedContent(
             targetState = currentEntry,
             transitionSpec = {
-                (fadeIn() togetherWith fadeOut())
+                (slideInVertically { height -> height / 2 } + fadeIn()) togetherWith 
+                (slideOutVertically { height -> -height / 2 } + fadeOut())
             },
             label = "LyricLineTransition"
         ) { entry ->
@@ -343,13 +357,16 @@ fun OverlayLyricsView(
                     )
                 } else {
                     // Line synced smooth view
+                    val textAlign = if (entry.agent != null && entry.agent != "v1") TextAlign.Right else TextAlign.Center
+                    val effectiveFontSize = if (entry.agent != null && entry.agent != "v1") fontSizeSp * 0.85f else fontSizeSp
+
                     Text(
                         text = entry.text,
                         style = TextStyle(
-                            fontSize = fontSizeSp.sp,
+                            fontSize = effectiveFontSize.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White,
-                            textAlign = TextAlign.Center,
+                            textAlign = textAlign,
                             shadow = Shadow(
                                 color = Color.Black,
                                 offset = Offset(2f, 2f),
@@ -373,44 +390,47 @@ fun WordSyncedLyricLine(
     val positionSeconds = positionMs / 1000.0
     val words = entry.words ?: emptyList()
 
-    val annotatedString = buildAnnotatedString {
+    // Agent alignment logic
+    val textAlign = if (entry.agent != null && entry.agent != "v1") TextAlign.Right else TextAlign.Center
+    val effectiveFontSize = if (entry.agent != null && entry.agent != "v1") fontSizeSp * 0.85f else fontSizeSp
+
+    FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = if (textAlign == TextAlign.Right) Arrangement.End else Arrangement.Center
+    ) {
         words.forEach { word ->
             val isActive = positionSeconds >= word.startTime && positionSeconds <= word.endTime
             val isPassed = positionSeconds > word.endTime
 
-            val color = when {
-                isActive -> Color(0xFFFFD700) // Vibrant Gold highlight
-                isPassed -> Color.White
-                else -> Color.White.copy(alpha = 0.6f)
-            }
+            val scale by animateFloatAsState(targetValue = if (isActive) 1.1f else 1.0f, label = "ScaleAnim")
+            val color by animateColorAsState(
+                targetValue = when {
+                    isActive -> Color(0xFFFFD700) // Vibrant Gold highlight
+                    isPassed -> Color.White
+                    else -> Color.White.copy(alpha = 0.6f)
+                },
+                label = "ColorAnim"
+            )
 
-            withStyle(
-                style = SpanStyle(
-                    color = color,
+            Text(
+                text = word.text + if (word.hasTrailingSpace) " " else "",
+                color = color,
+                style = TextStyle(
+                    fontSize = effectiveFontSize.sp,
                     fontWeight = if (isActive) FontWeight.ExtraBold else FontWeight.Bold,
                     shadow = Shadow(
                         color = Color.Black,
                         offset = Offset(2f, 2f),
                         blurRadius = 8f
                     )
-                )
-            ) {
-                append(word.text)
-                if (word.hasTrailingSpace) {
-                    append(" ")
+                ),
+                modifier = Modifier.graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
                 }
-            }
+            )
         }
     }
-
-    Text(
-        text = annotatedString,
-        style = TextStyle(
-            fontSize = fontSizeSp.sp,
-            textAlign = TextAlign.Center
-        ),
-        modifier = Modifier.fillMaxWidth()
-    )
 }
 
 @Composable
@@ -418,7 +438,6 @@ fun StatusOverlayView(text: String, fontSizeSp: Float) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color(0x44000000))
             .padding(16.dp),
         contentAlignment = Alignment.Center
     ) {
