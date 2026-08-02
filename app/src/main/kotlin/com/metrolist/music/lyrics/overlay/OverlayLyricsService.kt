@@ -257,6 +257,7 @@ class OverlayLyricsService : Service() {
                 }
             }
         }
+        }
 
         try {
             windowManager?.addView(composeView, layoutParams)
