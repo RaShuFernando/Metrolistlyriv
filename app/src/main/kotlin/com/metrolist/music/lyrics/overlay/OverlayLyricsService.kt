@@ -68,7 +68,7 @@ import kotlinx.coroutines.flow.collectLatest
 import androidx.compose.runtime.getValue
 
 class ServiceLifecycleOwner : LifecycleOwner, SavedStateRegistryOwner, ViewModelStoreOwner {
-    private val lifecycleRegistry = LifecycleRegistry(this)
+    val lifecycleRegistry = LifecycleRegistry(this)
     private val savedStateRegistryController = SavedStateRegistryController.create(this)
     private val store = ViewModelStore()
 
@@ -192,6 +192,7 @@ class OverlayLyricsService : Service() {
 
         try {
             windowManager?.addView(composeView, layoutParams)
+            lifecycleOwner.lifecycleRegistry.currentState = Lifecycle.State.RESUMED
         } catch (e: Exception) {
             stopSelf()
         }
@@ -221,13 +222,14 @@ class OverlayLyricsService : Service() {
     override fun onDestroy() {
         lifecycleOwner.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
         lifecycleOwner.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
-        lifecycleOwner.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
 
         if (composeView != null && windowManager != null) {
             try {
                 windowManager?.removeView(composeView)
             } catch (_: Exception) {}
         }
+        
+        lifecycleOwner.lifecycleRegistry.currentState = Lifecycle.State.DESTROYED
         super.onDestroy()
     }
 }

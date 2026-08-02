@@ -20,6 +20,8 @@ data class LyricMetadata(
     val album: String = "",
     val durationSeconds: Int = 0,
     val albumArtUrl: String = "",
+    val yt_description: String? = null,
+    val active_lyric_file: String? = null,
     val lyrics: List<LyricFileInfo> = emptyList(),
     val last_checked: Long = 0L,
     val last_updated: Long = 0L

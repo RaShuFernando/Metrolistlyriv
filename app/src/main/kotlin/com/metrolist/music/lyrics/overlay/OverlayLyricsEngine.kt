@@ -89,11 +89,41 @@ object OverlayLyricsEngine {
         val result = withTimeoutOrNull(30_000L) {
             var loadedLyrics: ParsedOverlayLyrics? = null
             dao.observeSongIndexByVideoId(videoId).collect { index ->
-                if (index != null && index.folderPath.isNotBlank() && index.activeLyricFile.isNotBlank()) {
-                    val directLyrics = loadDirectLyricFile(videoId, index.folderPath, index.activeLyricFile)
-                    if (directLyrics != null) {
-                        loadedLyrics = directLyrics
-                        return@collect // Got valid lyrics file
+                if (index != null && index.folderPath.isNotBlank()) {
+                    val metadataFile = File(index.folderPath, "metadata.json")
+                    var resolvedActiveFile: String? = null
+                    
+                    if (metadataFile.exists()) {
+                        try {
+                            val content = metadataFile.readText()
+                            val metadata = VaultManager.jsonSerializer.decodeFromString(
+                                com.metrolist.music.lyrics.vault.LyricMetadata.serializer(), 
+                                content
+                            )
+                            
+                            if (!metadata.active_lyric_file.isNullOrBlank()) {
+                                val testFile = File(index.folderPath, metadata.active_lyric_file)
+                                if (testFile.exists()) {
+                                    resolvedActiveFile = metadata.active_lyric_file
+                                }
+                            }
+                            
+                            if (resolvedActiveFile == null) {
+                                resolvedActiveFile = com.metrolist.music.lyrics.vault.LyricsRanking.selectActiveLyricFile(metadata.lyrics)
+                            }
+                        } catch (e: Exception) {
+                            resolvedActiveFile = index.activeLyricFile
+                        }
+                    } else {
+                        resolvedActiveFile = index.activeLyricFile
+                    }
+
+                    if (!resolvedActiveFile.isNullOrBlank()) {
+                        val directLyrics = loadDirectLyricFile(videoId, index.folderPath, resolvedActiveFile)
+                        if (directLyrics != null) {
+                            loadedLyrics = directLyrics
+                            return@collect // Got valid lyrics file
+                        }
                     }
                 }
             }

@@ -167,6 +167,7 @@ class VaultManager(private val masterFolderPath: String) {
                 album = metadata.album,
                 durationSeconds = metadata.durationSeconds,
                 albumArtUrl = metadata.albumArtUrl,
+                yt_description = metadata.description,
                 lyrics = lyricFileInfos,
                 last_checked = lastChecked,
                 last_updated = lastUpdated
@@ -204,15 +205,8 @@ class VaultManager(private val masterFolderPath: String) {
             try {
                 val content = metadataFile.readText()
                 val existing = jsonSerializer.decodeFromString(LyricMetadata.serializer(), content)
-                val updatedLyrics = existing.lyrics.map { info ->
-                    if (info.filename == selectedFilename) {
-                        info.copy(rank = 0)
-                    } else {
-                        info
-                    }
-                }
                 val updatedMetadata = existing.copy(
-                    lyrics = updatedLyrics,
+                    active_lyric_file = selectedFilename,
                     last_updated = System.currentTimeMillis()
                 )
                 val jsonString = jsonSerializer.encodeToString(LyricMetadata.serializer(), updatedMetadata)
@@ -253,6 +247,7 @@ class VaultManager(private val masterFolderPath: String) {
             put("albumArtUrl", metadata.albumArtUrl)
             put("composer", metadata.composer)
             put("description", metadata.description ?: "")
+            put("yt_description", metadata.description ?: "")
             put("mediaId", metadata.mediaId)
             put("releaseYear", metadata.releaseYear ?: JSONObject.NULL)
             put("trackNumber", metadata.trackNumber ?: JSONObject.NULL)
