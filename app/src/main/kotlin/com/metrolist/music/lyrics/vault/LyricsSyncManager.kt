@@ -4,6 +4,10 @@ import android.content.Context
 import android.os.Environment
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
@@ -13,6 +17,12 @@ object LyricsSyncManager {
     private const val TAG = "LyricsSyncManager"
 
     private val activeSyncKeys = ConcurrentHashMap.newKeySet<String>()
+    private val _activeSyncKeysFlow = MutableStateFlow<Set<String>>(emptySet())
+    val activeSyncKeysFlow: StateFlow<Set<String>> = _activeSyncKeysFlow.asStateFlow()
+
+    fun observeIsSyncing(syncKey: String): kotlinx.coroutines.flow.Flow<Boolean> {
+        return activeSyncKeysFlow.map { it.contains(syncKey) }
+    }
     private val recentSyncTimestamps = ConcurrentHashMap<String, Long>()
     private const val DEBOUNCE_WINDOW_MS = 10_000L
 
@@ -33,11 +43,13 @@ object LyricsSyncManager {
             FileLogger.d(TAG, "Sync already in progress for song: ${metadata.title} ($syncKey). Dropping duplicate event.")
             return@withContext
         }
+        _activeSyncKeysFlow.value = activeSyncKeys.toSet()
 
         val lastSync = recentSyncTimestamps[syncKey] ?: 0L
         if (System.currentTimeMillis() - lastSync < DEBOUNCE_WINDOW_MS) {
             FileLogger.d(TAG, "Song was recently synced: ${metadata.title} ($syncKey). Dropping event.")
             activeSyncKeys.remove(syncKey)
+            _activeSyncKeysFlow.value = activeSyncKeys.toSet()
             return@withContext
         }
 
@@ -207,6 +219,7 @@ object LyricsSyncManager {
         } finally {
             recentSyncTimestamps[syncKey] = System.currentTimeMillis()
             activeSyncKeys.remove(syncKey)
+            _activeSyncKeysFlow.value = activeSyncKeys.toSet()
         }
     }
 

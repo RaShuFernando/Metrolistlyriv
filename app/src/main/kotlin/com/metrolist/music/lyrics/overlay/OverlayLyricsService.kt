@@ -232,7 +232,7 @@ class OverlayLyricsService : Service() {
                         when (uiState) {
                         is LyricsUiState.Success -> {
                             val lyrics = (uiState as LyricsUiState.Success).lyrics
-                            if (lyrics.entries.isNotEmpty()) {
+                            if (lyrics.lines.isNotEmpty()) {
                                 OverlayLyricsView(
                                     overlayLyrics = lyrics,
                                     positionMs = positionMs,
@@ -241,16 +241,38 @@ class OverlayLyricsService : Service() {
                             }
                         }
                         is LyricsUiState.Loading -> {
-                            StatusOverlayView(
-                                text = "Searching for lyrics...",
-                                fontSizeSp = fontSizeSp
-                            )
+                            var isVisible by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(true) }
+                            androidx.compose.runtime.LaunchedEffect(Unit) {
+                                kotlinx.coroutines.delay(1000)
+                                isVisible = false
+                            }
+                            androidx.compose.animation.AnimatedVisibility(
+                                visible = isVisible,
+                                enter = fadeIn(),
+                                exit = fadeOut()
+                            ) {
+                                StatusOverlayView(
+                                    text = "Searching for lyrics...",
+                                    fontSizeSp = fontSizeSp
+                                )
+                            }
                         }
                         is LyricsUiState.NotFound -> {
-                            StatusOverlayView(
-                                text = "No lyrics found",
-                                fontSizeSp = fontSizeSp
-                            )
+                            var isVisible by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(true) }
+                            androidx.compose.runtime.LaunchedEffect(Unit) {
+                                kotlinx.coroutines.delay(2000)
+                                isVisible = false
+                            }
+                            androidx.compose.animation.AnimatedVisibility(
+                                visible = isVisible,
+                                enter = fadeIn(),
+                                exit = fadeOut()
+                            ) {
+                                StatusOverlayView(
+                                    text = "No lyrics found",
+                                    fontSizeSp = fontSizeSp
+                                )
+                            }
                         }
                         is LyricsUiState.Hidden -> {}
                     }
@@ -287,8 +309,6 @@ class OverlayLyricsService : Service() {
                                 currentUiState.value = LyricsUiState.Success(parsedLyrics)
                             } else {
                                 currentUiState.value = LyricsUiState.NotFound
-                                kotlinx.coroutines.delay(3000)
-                                currentUiState.value = LyricsUiState.Hidden
                             }
                         }
                 }
@@ -319,15 +339,11 @@ fun OverlayLyricsView(
     positionMs: Long,
     fontSizeSp: Float
 ) {
-    val currentEntry = remember(overlayLyrics.entries, positionMs) {
-        val entries = overlayLyrics.entries
-        if (entries.isEmpty()) null
+    val activeLines = remember(overlayLyrics.lines, positionMs) {
+        val lines = overlayLyrics.lines
+        if (lines.isEmpty()) emptyList()
         else {
-            var index = entries.binarySearch { (it.time - positionMs).toInt() }
-            if (index < 0) {
-                index = -index - 2
-            }
-            if (index >= 0 && index < entries.size) entries[index] else null
+            lines.filter { positionMs in it.startTimeMs..it.endTimeMs }
         }
     }
 
@@ -337,45 +353,41 @@ fun OverlayLyricsView(
             .padding(16.dp),
         contentAlignment = Alignment.Center
     ) {
-        AnimatedContent(
-            targetState = currentEntry,
-            transitionSpec = {
-                (slideInVertically { height -> height / 2 } + fadeIn()) togetherWith 
-                (slideOutVertically { height -> -height / 2 } + fadeOut())
-            },
-            label = "LyricLineTransition"
-        ) { entry ->
-            if (entry != null && entry.text.isNotBlank()) {
-                val words = entry.words
-                val hasWordTimestamps = !words.isNullOrEmpty()
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            activeLines.forEach { line ->
+                if (line.text.isNotBlank()) {
+                    val hasWordTimestamps = line.words.isNotEmpty()
 
-                if (hasWordTimestamps) {
-                    // Word / Syllable synced animation
-                    WordSyncedLyricLine(
-                        entry = entry,
-                        positionMs = positionMs,
-                        fontSizeSp = fontSizeSp
-                    )
-                } else {
-                    // Line synced smooth view
-                    val textAlign = if (entry.agent != null && entry.agent != "v1") TextAlign.Right else TextAlign.Center
-                    val effectiveFontSize = if (entry.agent != null && entry.agent != "v1") fontSizeSp * 0.85f else fontSizeSp
+                    if (hasWordTimestamps) {
+                        WordSyncedLyricLine(
+                            line = line,
+                            positionMs = positionMs,
+                            fontSizeSp = fontSizeSp
+                        )
+                    } else {
+                        val isBg = line.isBackground || (line.agent != null && line.agent != "v1")
+                        val textAlign = if (isBg) TextAlign.Right else TextAlign.Center
+                        val effectiveFontSize = if (isBg) fontSizeSp * 0.85f else fontSizeSp
 
-                    Text(
-                        text = entry.text,
-                        style = TextStyle(
-                            fontSize = effectiveFontSize.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White,
-                            textAlign = textAlign,
-                            shadow = Shadow(
-                                color = Color.Black,
-                                offset = Offset(2f, 2f),
-                                blurRadius = 8f
-                            )
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                        Text(
+                            text = line.text,
+                            style = TextStyle(
+                                fontSize = effectiveFontSize.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                textAlign = textAlign,
+                                shadow = Shadow(
+                                    color = Color.Black,
+                                    offset = Offset(2f, 2f),
+                                    blurRadius = 8f
+                                )
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                 }
             }
         }
@@ -384,24 +396,24 @@ fun OverlayLyricsView(
 
 @Composable
 fun WordSyncedLyricLine(
-    entry: LyricsEntry,
+    line: OverlayLyricLine,
     positionMs: Long,
     fontSizeSp: Float
 ) {
-    val positionSeconds = positionMs / 1000.0
-    val words = entry.words ?: emptyList()
+    val words = line.words
 
     // Agent alignment logic
-    val textAlign = if (entry.agent != null && entry.agent != "v1") TextAlign.Right else TextAlign.Center
-    val effectiveFontSize = if (entry.agent != null && entry.agent != "v1") fontSizeSp * 0.85f else fontSizeSp
+    val isBg = line.isBackground || (line.agent != null && line.agent != "v1")
+    val textAlign = if (isBg) TextAlign.Right else TextAlign.Center
+    val effectiveFontSize = if (isBg) fontSizeSp * 0.85f else fontSizeSp
 
-    FlowRow(
+    androidx.compose.foundation.layout.FlowRow(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (textAlign == TextAlign.Right) Arrangement.End else Arrangement.Center
     ) {
         words.forEach { word ->
-            val isActive = positionSeconds >= word.startTime && positionSeconds <= word.endTime
-            val isPassed = positionSeconds > word.endTime
+            val isActive = positionMs >= word.startTimeMs && positionMs <= word.endTimeMs
+            val isPassed = positionMs > word.endTimeMs
 
             val scale by animateFloatAsState(targetValue = if (isActive) 1.1f else 1.0f, label = "ScaleAnim")
             val color by animateColorAsState(

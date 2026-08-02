@@ -29,6 +29,10 @@ private val PAXSENIX_BG_LINE_REGEX = "^\\[bg:\\s*(.*)\\]$".toRegex()
 private val AGENT_REGEX = "\\{agent:([^}]+)\\}".toRegex()
 private val BACKGROUND_REGEX = "^\\{bg\\}".toRegex()
 
+// QRC Format: [line_start,line_duration]Word(offset,duration)
+private val QRC_LINE_REGEX = "^\\[(\\d+),(\\d+)\\](.*)$".toRegex()
+private val QRC_WORD_REGEX = "([^\\(]+)\\(\\(?(\\d+),(\\d+)\\)?\\)".toRegex()
+
 @Suppress("RegExpRedundantEscape")
 object LyricsUtils {
     fun cleanTitleForSearch(title: String): String {
@@ -448,11 +452,94 @@ object LyricsUtils {
             RICH_SYNC_WORD_REGEX.containsMatchIn(line)
         }
 
-        return if (isRichSync) {
+        // Check if this is QRC format
+        val isQrcSync = lines.any { line ->
+            QRC_LINE_REGEX.matches(line.trim())
+        }
+
+        return if (isQrcSync) {
+            parseQrcLyrics(lines)
+        } else if (isRichSync) {
             parseRichSyncLyrics(lines)
         } else {
             parseStandardLyrics(lines)
         }
+    }
+
+    /**
+     * Parse QRC lyrics format: [line_start,line_duration]word1(offset,duration)word2(offset,duration)
+     */
+    private fun parseQrcLyrics(lines: List<String>): List<LyricsEntry> {
+        val result = mutableListOf<LyricsEntry>()
+        var lastNonBgAgent: String? = null
+
+        lines.forEachIndexed { _, line ->
+            val trimmedLine = line.trim()
+            val matchResult = QRC_LINE_REGEX.matchEntire(trimmedLine)
+            
+            if (matchResult != null) {
+                val lineStartMs = matchResult.groupValues[1].toLongOrNull() ?: 0L
+                val lineDurationMs = matchResult.groupValues[2].toLongOrNull() ?: 0L
+                var content = matchResult.groupValues[3].trimStart()
+                
+                // Parse agent marker {agent:v1}
+                val oldAgentMatch = AGENT_REGEX.find(content)
+                val agent = oldAgentMatch?.groupValues?.get(1)
+                if (oldAgentMatch != null) {
+                    content = content.replaceFirst(AGENT_REGEX, "")
+                }
+
+                // Parse background marker {bg}
+                val isBackground = BACKGROUND_REGEX.containsMatchIn(content)
+                if (isBackground) {
+                    content = content.replaceFirst(BACKGROUND_REGEX, "")
+                }
+
+                val wordMatches = QRC_WORD_REGEX.findAll(content).toList()
+                val wordTimings = mutableListOf<WordTimestamp>()
+                val plainTextBuilder = java.lang.StringBuilder()
+
+                if (wordMatches.isNotEmpty()) {
+                    wordMatches.forEach { match ->
+                        val wordText = match.groupValues[1]
+                        val wordOffset = match.groupValues[2].toLongOrNull() ?: 0L
+                        val wordDuration = match.groupValues[3].toLongOrNull() ?: 0L
+                        
+                        val absoluteStartTime = (lineStartMs + wordOffset) / 1000.0
+                        val absoluteEndTime = absoluteStartTime + (wordDuration / 1000.0)
+                        
+                        wordTimings.add(
+                            WordTimestamp(
+                                text = wordText,
+                                startTime = absoluteStartTime,
+                                endTime = absoluteEndTime,
+                                hasTrailingSpace = false // QRC format doesn't have spaces by default, let's keep them attached
+                            )
+                        )
+                        plainTextBuilder.append(wordText)
+                    }
+                } else {
+                    plainTextBuilder.append(content)
+                }
+
+                val plainText = plainTextBuilder.toString().trim()
+                if (!isBackground && !agent.isNullOrBlank()) {
+                    lastNonBgAgent = agent
+                }
+
+                result.add(
+                    LyricsEntry(
+                        time = lineStartMs,
+                        text = plainText,
+                        words = if (wordTimings.isNotEmpty()) wordTimings else null,
+                        agent = if (isBackground) lastNonBgAgent ?: "bg" else agent,
+                        isBackground = isBackground
+                    )
+                )
+            }
+        }
+        
+        return result.sorted()
     }
 
     /**
