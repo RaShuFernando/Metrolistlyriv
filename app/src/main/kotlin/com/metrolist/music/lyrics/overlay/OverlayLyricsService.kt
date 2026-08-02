@@ -216,8 +216,20 @@ class OverlayLyricsService : Service() {
 
             setContent {
                 val uiState by currentUiState.collectAsState()
-                val currentPositionProvider = { currentPositionMs.value }
                 val isPlaying by isPlaying.collectAsState()
+                
+                // Dedicated Position Ticker that emits to a Compose State
+                val tickerState = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(currentPositionMs.value) }
+                androidx.compose.runtime.LaunchedEffect(isPlaying) {
+                    if (isPlaying) {
+                        while (kotlinx.coroutines.isActive) {
+                            tickerState.value = currentPositionMs.value
+                            kotlinx.coroutines.delay(50)
+                        }
+                    }
+                }
+                
+                val currentPositionProvider = { tickerState.value }
                 val fontSizeSp by OverlayLyricsPreferences.getOverlayFontSize(this@OverlayLyricsService)
                     .collectAsState(initial = 18f)
                 val enabled by OverlayLyricsPreferences.getOverlayEnabled(this@OverlayLyricsService)
