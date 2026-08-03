@@ -114,6 +114,8 @@ object LyricsSyncManager {
                     FileLogger.e(TAG, "TurnstileTimeout on attempt $attempt for ${metadata.title}: ${e.message}", e)
                     authenticator.clearCachedToken()
                     if (attempt >= maxAttempts) break
+                } catch (e: RateLimitException) {
+                    throw e // Propagate to prefetcher
                 } catch (e: Exception) {
                     FileLogger.e(TAG, "Unexpected exception on attempt $attempt for ${metadata.title}: ${e.message}", e)
                     break

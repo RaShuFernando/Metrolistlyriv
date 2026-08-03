@@ -202,6 +202,52 @@ fun OverlayLyricsSettingsScreen(
                     )
                 )
             )
+            
+            Spacer(modifier = Modifier.height(16.dp))
+
+            val prefetchEnabled by OverlayLyricsPreferences.getLyricsPrefetchEnabled(context).collectAsState(initial = false)
+            val prefetchCount by OverlayLyricsPreferences.getLyricsPrefetchCount(context).collectAsState(initial = 1)
+
+            Material3SettingsGroup(
+                title = "Database Builder",
+                items = listOf(
+                    Material3SettingsItem(
+                        icon = painterResource(R.drawable.download),
+                        title = { Text("Pre-download upcoming lyrics") },
+                        description = { Text("Automatically downloads lyrics for upcoming songs in the background") },
+                        trailingContent = {
+                            Switch(
+                                checked = prefetchEnabled,
+                                onCheckedChange = { newValue ->
+                                    coroutineScope.launch {
+                                        OverlayLyricsPreferences.setLyricsPrefetchEnabled(context, newValue)
+                                    }
+                                }
+                            )
+                        }
+                    ),
+                    Material3SettingsItem(
+                        icon = painterResource(R.drawable.queue_music),
+                        title = { Text("Songs to pre-download") },
+                        description = {
+                            Column {
+                                Text("$prefetchCount songs", color = if (prefetchEnabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
+                                Slider(
+                                    value = prefetchCount.toFloat(),
+                                    onValueChange = { newSize ->
+                                        coroutineScope.launch {
+                                            OverlayLyricsPreferences.setLyricsPrefetchCount(context, newSize.toInt())
+                                        }
+                                    },
+                                    valueRange = 1f..20f,
+                                    steps = 18,
+                                    enabled = prefetchEnabled
+                                )
+                            }
+                        }
+                    )
+                )
+            )
         }
 
         if (showVersionDialog) {

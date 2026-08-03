@@ -35,4 +35,31 @@ object OverlayLyricsPreferences {
             prefs[KEY_OVERLAY_FONT_SIZE] = fontSize
         }
     }
+
+    private val KEY_ENABLE_LYRICS_PREFETCH = booleanPreferencesKey("enable_lyrics_prefetch")
+    private val KEY_LYRICS_PREFETCH_COUNT = androidx.datastore.preferences.core.intPreferencesKey("lyrics_prefetch_count")
+
+    fun getLyricsPrefetchEnabled(context: Context): Flow<Boolean> {
+        return context.dataStore.data.map { prefs ->
+            prefs[KEY_ENABLE_LYRICS_PREFETCH] ?: false
+        }
+    }
+
+    suspend fun setLyricsPrefetchEnabled(context: Context, enabled: Boolean) {
+        context.safeDataStoreEdit { prefs ->
+            prefs[KEY_ENABLE_LYRICS_PREFETCH] = enabled
+        }
+    }
+
+    fun getLyricsPrefetchCount(context: Context): Flow<Int> {
+        return context.dataStore.data.map { prefs ->
+            prefs[KEY_LYRICS_PREFETCH_COUNT] ?: 1
+        }
+    }
+
+    suspend fun setLyricsPrefetchCount(context: Context, count: Int) {
+        context.safeDataStoreEdit { prefs ->
+            prefs[KEY_LYRICS_PREFETCH_COUNT] = count.coerceIn(1, 20)
+        }
+    }
 }
