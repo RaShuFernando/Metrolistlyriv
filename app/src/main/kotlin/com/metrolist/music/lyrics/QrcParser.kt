@@ -5,12 +5,12 @@ import com.metrolist.music.lyrics.overlay.OverlayLyricLine
 import com.metrolist.music.lyrics.overlay.OverlayLyricWord
 
 class QrcParser : LyricParser {
-    // Matches [line_start, duration] or standard [mm:ss.xx]
-    private val QRC_LINE_REGEX = Regex("""^\[(\d+),(\d+)\](.*)$""")
+    // Matches [start,duration] followed by everything up to the next [start,duration] or end of string
+    private val QRC_LINE_REGEX = Regex("""\[(\d+),(\d+)\](.*?)(?=\s*\[\d+,\d+\]|$)""", RegexOption.DOT_MATCHES_ALL)
     private val LRC_LINE_REGEX = Regex("""^\[(\d{1,2}):(\d{2})\.(\d{2,3})\](.*)$""")
     
-    // Matches Word(start, duration) or Word((start,duration))
-    private val QRC_WORD_REGEX = Regex("""([^\(]+)\(\(?(\d+),(\d+)\)?\)""")
+    // Matches any text (lazy evaluation) followed by (start,duration)
+    private val QRC_WORD_REGEX = Regex("""(.*?)\((\d+),(\d+)\)""")
 
     private val AGENT_REGEX = Regex("""\{agent:([^}]+)\}""")
     private val BACKGROUND_REGEX = Regex("""^\{bg\}""")
@@ -20,52 +20,29 @@ class QrcParser : LyricParser {
         var lastNonBgAgent: String? = null
         
         val text = rawText.trim()
-        val actualLines = if (text.startsWith("<?xml") || text.startsWith("<QrcInfos>")) {
+        val extracted = if (text.startsWith("<?xml") || text.startsWith("<QrcInfos>")) {
             val lyricContentMatch = Regex("""LyricContent="([^"]+)"""").find(text)
-            val extracted = lyricContentMatch?.groupValues?.get(1) ?: ""
-            // Decode basic XML entities
-            extracted
-                .replace("&#10;", "\n")
-                .replace("&#13;", "\r")
-                .replace("&amp;", "&")
-                .replace("&lt;", "<")
-                .replace("&gt;", ">")
-                .replace("&quot;", "\"")
-                .replace("&apos;", "'")
-                .lines()
+            lyricContentMatch?.groupValues?.get(1)
+                ?.replace("&#10;", "\n")
+                ?.replace("&#13;", "\r")
+                ?.replace("&amp;", "&")
+                ?.replace("&lt;", "<")
+                ?.replace("&gt;", ">")
+                ?.replace("&quot;", "\"")
+                ?.replace("&apos;", "'") ?: ""
         } else {
-            text.lines()
+            text
         }
 
-        actualLines.forEach { line ->
-            val trimmedLine = line.trim()
-            if (trimmedLine.isBlank()) return@forEach
-            
-            var lineStartMs = 0L
-            var lineDurationMs = 0L
-            var content = trimmedLine
-            var matchFound = false
+        // Find all QRC line matches directly across the entire content string
+        val qrcMatches = QRC_LINE_REGEX.findAll(extracted).toList()
 
-            val qrcMatch = QRC_LINE_REGEX.matchEntire(trimmedLine)
-            if (qrcMatch != null) {
-                lineStartMs = qrcMatch.groupValues[1].toLongOrNull() ?: 0L
-                lineDurationMs = qrcMatch.groupValues[2].toLongOrNull() ?: 0L
-                content = qrcMatch.groupValues[3].trimStart()
-                matchFound = true
-            } else {
-                val lrcMatch = LRC_LINE_REGEX.matchEntire(trimmedLine)
-                if (lrcMatch != null) {
-                    val minutes = lrcMatch.groupValues[1].toLongOrNull() ?: 0L
-                    val seconds = lrcMatch.groupValues[2].toLongOrNull() ?: 0L
-                    val fraction = lrcMatch.groupValues[3].toLongOrNull() ?: 0L
-                    val millisPart = if (lrcMatch.groupValues[3].length == 3) fraction else fraction * 10
-                    lineStartMs = minutes * 60000 + seconds * 1000 + millisPart
-                    content = lrcMatch.groupValues[4].trimStart()
-                    matchFound = true
-                }
-            }
+        if (qrcMatches.isNotEmpty()) {
+            qrcMatches.forEach { match ->
+                val lineStartMs = match.groupValues[1].toLongOrNull() ?: 0L
+                val lineDurationMs = match.groupValues[2].toLongOrNull() ?: 0L
+                var content = match.groupValues[3].trim()
 
-            if (matchFound) {
                 // Parse agent marker {agent:v1}
                 val oldAgentMatch = AGENT_REGEX.find(content)
                 val agent = oldAgentMatch?.groupValues?.get(1)
@@ -84,22 +61,22 @@ class QrcParser : LyricParser {
                 val plainTextBuilder = StringBuilder()
 
                 if (wordMatches.isNotEmpty()) {
-                    wordMatches.forEach { match ->
-                        val wordText = match.groupValues[1]
-                        // Crucial Rule: start_ms is an absolute timestamp in milliseconds. Do not add line_start_ms to it.
-                        val wordOffset = match.groupValues[2].toLongOrNull() ?: 0L
-                        val wordDuration = match.groupValues[3].toLongOrNull() ?: 0L
+                    wordMatches.forEach { wordMatch ->
+                        val wordText = wordMatch.groupValues[1]
+                        // Crucial Rule: start_ms is an absolute timestamp in milliseconds.
+                        val wordOffset = wordMatch.groupValues[2].toLongOrNull() ?: 0L
+                        val wordDuration = wordMatch.groupValues[3].toLongOrNull() ?: 0L
                         
                         val absoluteStartTimeMs = wordOffset
                         val absoluteEndTimeMs = absoluteStartTimeMs + wordDuration
                         
-                        if (wordText.isNotBlank()) {
+                        if (wordText.isNotEmpty()) {
                             overlayWords.add(
                                 OverlayLyricWord(
                                     text = wordText,
                                     startTimeMs = absoluteStartTimeMs,
                                     endTimeMs = absoluteEndTimeMs,
-                                    hasTrailingSpace = false, // QRC typically doesn't need this, or it includes spaces
+                                    hasTrailingSpace = false, 
                                     isBackground = isBackground
                                 )
                             )
@@ -133,6 +110,35 @@ class QrcParser : LyricParser {
                         isBackground = isBackground
                     )
                 )
+            }
+        } else {
+            // Fallback for standard LRC parsing if no QRC tags are found
+            extracted.lines().forEach { line ->
+                val trimmedLine = line.trim()
+                if (trimmedLine.isBlank()) return@forEach
+                
+                val lrcMatch = LRC_LINE_REGEX.matchEntire(trimmedLine)
+                if (lrcMatch != null) {
+                    val minutes = lrcMatch.groupValues[1].toLongOrNull() ?: 0L
+                    val seconds = lrcMatch.groupValues[2].toLongOrNull() ?: 0L
+                    val fraction = lrcMatch.groupValues[3].toLongOrNull() ?: 0L
+                    val millisPart = if (lrcMatch.groupValues[3].length == 3) fraction else fraction * 10
+                    val lineStartMs = minutes * 60000 + seconds * 1000 + millisPart
+                    val plainText = lrcMatch.groupValues[4].trimStart()
+                    
+                    if (plainText.isNotBlank()) {
+                        result.add(
+                            OverlayLyricLine(
+                                text = plainText,
+                                startTimeMs = lineStartMs,
+                                endTimeMs = lineStartMs + 5000L, // Arbitrary duration for standard LRC
+                                words = emptyList(),
+                                agent = null,
+                                isBackground = false
+                            )
+                        )
+                    }
+                }
             }
         }
         
