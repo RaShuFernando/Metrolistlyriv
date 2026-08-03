@@ -228,7 +228,20 @@ class PlayerConnection(
         scope.launch {
             mediaMetadata.collect {
                 checkAndTriggerLyricsSync()
-                prefetchUpcomingLyrics()
+                
+                val prefetchEnabled = context.dataStore.data.first()[com.metrolist.music.constants.PrefetchUpcomingLyricsKey] ?: false
+                if (prefetchEnabled) {
+                    val currentIndex = currentWindowIndex.value
+                    if (currentIndex >= 0) {
+                        val upcomingIds = queueWindows.value
+                            .drop(currentIndex + 1)
+                            .take(10)
+                            .mapNotNull { it.mediaItem.mediaId }
+                        if (upcomingIds.isNotEmpty()) {
+                            prefetchUpcomingLyrics(upcomingIds)
+                        }
+                    }
+                }
             }
         }
 
@@ -250,18 +263,18 @@ class PlayerConnection(
 
     private var lastSyncedVideoId: String? = null
 
-    private fun prefetchUpcomingLyrics() {
+    private fun prefetchUpcomingLyrics(upcomingIds: List<String>) {
         scope.launch(Dispatchers.IO) {
-            val prefetchEnabled = context.dataStore.data.first()[com.metrolist.music.constants.PrefetchUpcomingLyricsKey] ?: false
-            if (!prefetchEnabled) return@launch
-
-            val currentIndex = currentWindowIndex.value
-            if (currentIndex < 0) return@launch
-            
-            val upcomingWindows = queueWindows.value.drop(currentIndex + 1).take(10)
-            for (window in upcomingWindows) {
+            for (videoId in upcomingIds) {
+                // Check local DB first
+                val existing = database.lyrics(videoId).first()
+                if (existing != null) continue
+                
+                // Get metadata from queue windows to pass to the download logic
+                val window = queueWindows.value.find { it.mediaItem.mediaId == videoId } ?: continue
                 val metadata = window.mediaItem.metadata ?: continue
-                val durationSeconds = if (metadata.duration > 0) metadata.duration else -1L
+                
+                val durationSeconds = if (metadata.duration.toInt() > 0) metadata.duration.toInt() else -1
                 if (durationSeconds <= 0) continue
                 
                 val vaultMetadata = VaultMetadata(
@@ -269,7 +282,7 @@ class PlayerConnection(
                     title = metadata.title,
                     artist = metadata.artists.joinToString(", ") { it.name },
                     album = metadata.album?.title ?: "",
-                    durationSeconds = durationSeconds.toInt(),
+                    durationSeconds = durationSeconds,
                     albumArtUrl = metadata.thumbnailUrl ?: "",
                     composer = "",
                     description = "",
@@ -280,7 +293,15 @@ class PlayerConnection(
                     albumBrowseId = metadata.album?.id,
                     isExplicit = metadata.explicit
                 )
-                LyricsSyncManager.syncLyrics(context.applicationContext, vaultMetadata)
+                
+                try {
+                    LyricsSyncManager.syncLyrics(context.applicationContext, vaultMetadata)
+                } catch (e: Exception) {
+                    Timber.tag(TAG).e(e, "Error pre-fetching lyrics for $videoId")
+                }
+                
+                // Crucial delay to prevent rate-limiting
+                delay(2000L)
             }
         }
     }
