@@ -1038,5 +1038,7 @@
     <string name="overlay_permission_required">Overlay Permission Required</string>
     <string name="overlay_permission_required_desc">Please grant system alert window permission in Android settings to use overlay lyrics.</string>
     <string name="no_versions_found">No lyric versions found for current song</string>
+    <string name="prefetch_upcoming_lyrics">Pre-fetch Upcoming Lyrics</string>
+    <string name="prefetch_upcoming_lyrics_desc">Automatically download lyrics for the next 10 songs in the queue. This ensures seamless playback but uses extra background data.</string>
 </resources>
 

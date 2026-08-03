@@ -47,6 +47,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import timber.log.Timber
 import java.time.LocalDate
@@ -227,6 +228,7 @@ class PlayerConnection(
         scope.launch {
             mediaMetadata.collect {
                 checkAndTriggerLyricsSync()
+                prefetchUpcomingLyrics()
             }
         }
 
@@ -247,6 +249,41 @@ class PlayerConnection(
 
 
     private var lastSyncedVideoId: String? = null
+
+    private fun prefetchUpcomingLyrics() {
+        scope.launch(Dispatchers.IO) {
+            val prefetchEnabled = context.dataStore.data.first()[com.metrolist.music.constants.PrefetchUpcomingLyricsKey] ?: false
+            if (!prefetchEnabled) return@launch
+
+            val currentIndex = currentWindowIndex.value
+            if (currentIndex < 0) return@launch
+            
+            val upcomingWindows = queueWindows.value.drop(currentIndex + 1).take(10)
+            for (window in upcomingWindows) {
+                val metadata = window.mediaItem.metadata ?: continue
+                val durationSeconds = if (metadata.duration > 0) metadata.duration else -1L
+                if (durationSeconds <= 0) continue
+                
+                val vaultMetadata = VaultMetadata(
+                    videoId = metadata.id,
+                    title = metadata.title,
+                    artist = metadata.artists.joinToString(", ") { it.name },
+                    album = metadata.album?.title ?: "",
+                    durationSeconds = durationSeconds.toInt(),
+                    albumArtUrl = metadata.thumbnailUrl ?: "",
+                    composer = "",
+                    description = "",
+                    mediaId = metadata.id,
+                    releaseYear = null,
+                    trackNumber = null,
+                    artistBrowseId = metadata.artists.firstOrNull()?.id,
+                    albumBrowseId = metadata.album?.id,
+                    isExplicit = metadata.explicit
+                )
+                LyricsSyncManager.syncLyrics(context.applicationContext, vaultMetadata)
+            }
+        }
+    }
 
     private fun checkAndTriggerLyricsSync() {
         val metadata = mediaMetadata.value ?: return

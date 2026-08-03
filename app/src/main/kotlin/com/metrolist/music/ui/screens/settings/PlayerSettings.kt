@@ -202,6 +202,10 @@ fun PlayerSettings(
         PreventDuplicateTracksInQueueKey,
         defaultValue = false
     )
+    val (prefetchUpcomingLyrics, onPrefetchUpcomingLyricsChange) = rememberPreference(
+        com.metrolist.music.constants.PrefetchUpcomingLyricsKey,
+        defaultValue = false
+    )
     val (stopMusicOnTaskClear, onStopMusicOnTaskClearChange) = rememberPreference(
         StopMusicOnTaskClearKey,
         defaultValue = false
@@ -997,6 +1001,27 @@ fun PlayerSettings(
                         )
                     },
                     onClick = { onAutoSkipNextOnErrorChange(!autoSkipNextOnError) }
+                ),
+                Material3SettingsItem(
+                    icon = painterResource(R.drawable.lyrics),
+                    title = { Text(stringResource(R.string.prefetch_upcoming_lyrics)) },
+                    description = { Text(stringResource(R.string.prefetch_upcoming_lyrics_desc)) },
+                    trailingContent = {
+                        Switch(
+                            checked = prefetchUpcomingLyrics,
+                            onCheckedChange = onPrefetchUpcomingLyricsChange,
+                            thumbContent = {
+                                Icon(
+                                    painter = painterResource(
+                                        id = if (prefetchUpcomingLyrics) R.drawable.check else R.drawable.close
+                                    ),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(SwitchDefaults.IconSize)
+                                )
+                            }
+                        )
+                    },
+                    onClick = { onPrefetchUpcomingLyricsChange(!prefetchUpcomingLyrics) }
                 )
             )
         )
