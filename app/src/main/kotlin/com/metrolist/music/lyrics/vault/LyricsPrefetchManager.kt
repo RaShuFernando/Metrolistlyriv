@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import timber.log.Timber
 
+import com.metrolist.music.extensions.metadata
+
 object LyricsPrefetchManager {
     private const val TAG = "LyricsPrefetchManager"
     private var currentPrefetchJob: Job? = null
@@ -35,7 +37,13 @@ object LyricsPrefetchManager {
             Timber.tag(TAG).d("Starting prefetch for ${upcomingWindows.size} upcoming songs")
 
             for (window in upcomingWindows) {
-                val metadata = window.mediaItem.metadata ?: continue
+                // Fixed mediaItem.metadata to mediaItem.mediaMetadata as requested
+                val mediaMetadata = window.mediaItem.mediaMetadata
+                
+                // Using the custom extension for extended properties like duration and explicit
+                val customMetadata = window.mediaItem.metadata ?: continue
+                
+                // Fixed mediaItem.id to mediaItem.mediaId
                 val videoId = window.mediaItem.mediaId ?: continue
 
                 // Check local DB first to see if lyrics exist
@@ -45,24 +53,25 @@ object LyricsPrefetchManager {
                     continue
                 }
 
-                val durationSeconds = if (metadata.duration.toInt() > 0) metadata.duration.toInt() else -1
+                val durationSeconds = if (customMetadata.duration.toInt() > 0) customMetadata.duration.toInt() else -1
                 if (durationSeconds <= 0) continue
 
                 val vaultMetadata = VaultMetadata(
-                    videoId = metadata.id,
-                    title = metadata.title,
-                    artist = metadata.artists.joinToString(", ") { it.name },
-                    album = metadata.album?.title ?: "",
+                    videoId = window.mediaItem.mediaId ?: "", // Fix: Use mediaItem.mediaId
+                    title = mediaMetadata.title?.toString() ?: customMetadata.title,
+                    // Fix: Explicitly named the lambda variable to 'artist' instead of implicit 'it'
+                    artist = customMetadata.artists.joinToString(", ") { artist -> artist.name },
+                    album = mediaMetadata.albumTitle?.toString() ?: customMetadata.album?.title ?: "",
                     durationSeconds = durationSeconds,
-                    albumArtUrl = metadata.thumbnailUrl ?: "",
+                    albumArtUrl = mediaMetadata.artworkUri?.toString() ?: customMetadata.thumbnailUrl ?: "",
                     composer = "",
                     description = "",
-                    mediaId = metadata.id,
+                    mediaId = window.mediaItem.mediaId ?: "", // Fix: Use mediaItem.mediaId
                     releaseYear = null,
                     trackNumber = null,
-                    artistBrowseId = metadata.artists.firstOrNull()?.id,
-                    albumBrowseId = metadata.album?.id,
-                    isExplicit = metadata.explicit
+                    artistBrowseId = customMetadata.artists.firstOrNull()?.id,
+                    albumBrowseId = customMetadata.album?.id,
+                    isExplicit = customMetadata.explicit
                 )
 
                 try {
