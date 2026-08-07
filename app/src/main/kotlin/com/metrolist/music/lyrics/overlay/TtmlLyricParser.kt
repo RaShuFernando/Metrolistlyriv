@@ -132,7 +132,8 @@ class TtmlLyricParser(private val isGoLyrics: Boolean = false) : LyricParser {
                                             startTimeMs = state.startTimeMs,
                                             endTimeMs = state.endTimeMs,
                                             hasTrailingSpace = if (isGoLyrics) true else rawText.lastOrNull()?.isWhitespace() == true,
-                                            isBackground = state.isBackground
+                                            isBackground = state.isBackground,
+                                            agent = state.agent
                                         )
                                         
                                         val pState = stack.findLast { it.name == "p" }
@@ -160,6 +161,58 @@ class TtmlLyricParser(private val isGoLyrics: Boolean = false) : LyricParser {
         } catch (e: Exception) {
             e.printStackTrace()
         }
+
+        // Post-processing: fill missing end times
+        for (i in lines.indices) {
+            val line = lines[i]
+            val nextLineStartTime = if (i < lines.size - 1) lines[i + 1].startTimeMs else line.startTimeMs + 5000L
+            
+            var fixedLineEndTime = line.endTimeMs
+            if (fixedLineEndTime <= line.startTimeMs) {
+                // If line endTime is missing, try to derive from last word
+                fixedLineEndTime = line.words.lastOrNull()?.endTimeMs?.takeIf { it > line.startTimeMs } ?: nextLineStartTime
+            }
+            
+            // To prevent the lyrics from prematurely vanishing, we ensure the line stays active
+            // until the next line begins, but we cap this extension to 10 seconds after the last word.
+            val maxWordEnd = line.words.maxOfOrNull { it.endTimeMs }?.takeIf { it > line.startTimeMs } ?: fixedLineEndTime
+            val desiredEndTime = nextLineStartTime.coerceAtMost(maxWordEnd + 10000L)
+            
+            if (fixedLineEndTime < desiredEndTime) {
+                fixedLineEndTime = desiredEndTime
+            }
+            
+            // For words, ensure they have valid end times
+            val fixedWords = line.words.mapIndexed { j, word ->
+                var fixedWordEndTime = word.endTimeMs
+                if (fixedWordEndTime <= word.startTimeMs) {
+                    fixedWordEndTime = if (j < line.words.size - 1) {
+                        line.words[j + 1].startTimeMs
+                    } else {
+                        fixedLineEndTime
+                    }
+                }
+                // If it's still <= start, just add a minimum duration so it doesn't instantly vanish
+                if (fixedWordEndTime <= word.startTimeMs) {
+                    fixedWordEndTime = word.startTimeMs + 200L
+                }
+                word.copy(endTimeMs = fixedWordEndTime)
+            }
+            
+            // Also ensure the line itself has a minimum duration and encompasses its words
+            val maxWordEnd = fixedWords.maxOfOrNull { it.endTimeMs } ?: fixedLineEndTime
+            if (fixedLineEndTime < maxWordEnd) {
+                fixedLineEndTime = maxWordEnd
+            }
+            
+            // If the next line is very far away, we don't necessarily want it to stay forever, but we ensure it doesn't vanish prematurely.
+            
+            lines[i] = line.copy(
+                endTimeMs = fixedLineEndTime,
+                words = fixedWords
+            )
+        }
+
         return lines
     }
 }

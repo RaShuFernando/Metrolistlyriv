@@ -479,63 +479,75 @@ fun WordSyncedLyricLine(
 ) {
     val words = line.words
 
-    // Agent alignment logic
+    // Agent alignment logic for the whole line
     val isBg = line.isBackground
-    val textAlign = when {
-        isBg -> TextAlign.Right
-        line.agent == "v2" -> TextAlign.Right
-        else -> TextAlign.Start
+    
+    val groupedWords = words.groupBy { word ->
+        when {
+            word.isBackground || isBg -> "bg"
+            word.agent == "v2" || line.agent == "v2" -> "v2"
+            else -> "v1"
+        }
     }
-    val effectiveFontSize = if (isBg) fontSizeSp * 0.85f else fontSizeSp
 
-    androidx.compose.foundation.layout.FlowRow(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = if (textAlign == TextAlign.Right) Arrangement.End else Arrangement.Start
-    ) {
-        words.forEach { word ->
-            val isActive by androidx.compose.runtime.remember { androidx.compose.runtime.derivedStateOf { currentPositionProvider() in word.startTimeMs..word.endTimeMs } }
-            val isPassed by androidx.compose.runtime.remember { androidx.compose.runtime.derivedStateOf { currentPositionProvider() > word.endTimeMs } }
+    Box(modifier = Modifier.fillMaxWidth()) {
+        groupedWords.forEach { (agentKey, agentWords) ->
+            val textAlign = when (agentKey) {
+                "bg", "v2" -> TextAlign.Right
+                else -> TextAlign.Start
+            }
+            val effectiveFontSize = if (agentKey == "bg") fontSizeSp * 0.85f else fontSizeSp
 
-            val scale by animateFloatAsState(
-                targetValue = if (isActive && (wordAnimation == 2 || wordAnimation == 4)) 1.15f else 1.0f,
-                animationSpec = if (wordAnimation == 2 || wordAnimation == 4) androidx.compose.animation.core.spring(dampingRatio = 0.5f, stiffness = 500f) else androidx.compose.animation.core.tween(),
-                label = "ScaleAnim"
-            )
-            
-            val wordFontSize = if (word.isBackground) effectiveFontSize * 0.85f else effectiveFontSize
-            
-            val shadowRadius by animateFloatAsState(
-                targetValue = if (isActive && wordAnimation == 3) 16f else 8f,
-                label = "GlowAnim"
-            )
-            
-            val color by animateColorAsState(
-                targetValue = when {
-                    isActive -> Color(activeWordColor)
-                    isPassed -> Color(activeLineColor)
-                    else -> Color(inactiveLineColor)
-                },
-                label = "ColorAnim"
-            )
+            androidx.compose.foundation.layout.FlowRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(if (textAlign == TextAlign.Right) Alignment.TopEnd else Alignment.TopStart),
+                horizontalArrangement = if (textAlign == TextAlign.Right) Arrangement.End else Arrangement.Start
+            ) {
+                agentWords.forEach { word ->
+                    val isActive by androidx.compose.runtime.remember { androidx.compose.runtime.derivedStateOf { currentPositionProvider() in word.startTimeMs..word.endTimeMs } }
+                    val isPassed by androidx.compose.runtime.remember { androidx.compose.runtime.derivedStateOf { currentPositionProvider() > word.endTimeMs } }
 
-            Text(
-                text = word.text + if (word.hasTrailingSpace) " " else "",
-                color = color,
-                style = TextStyle(
-                    fontSize = wordFontSize.sp,
-                    fontWeight = if (isActive) FontWeight.ExtraBold else FontWeight.Bold,
-                    fontStyle = if (word.isBackground || isBg) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal,
-                    shadow = Shadow(
-                        color = if (isActive && wordAnimation == 3) Color(activeWordColor) else Color.Black,
-                        offset = Offset(2f, 2f),
-                        blurRadius = shadowRadius
+                    val scale by animateFloatAsState(
+                        targetValue = if (isActive && (wordAnimation == 2 || wordAnimation == 4)) 1.15f else 1.0f,
+                        animationSpec = if (wordAnimation == 2 || wordAnimation == 4) androidx.compose.animation.core.spring(dampingRatio = 0.5f, stiffness = 500f) else androidx.compose.animation.core.tween(),
+                        label = "ScaleAnim"
                     )
-                ),
-                modifier = Modifier.graphicsLayer {
-                    scaleX = scale
-                    scaleY = scale
+                    
+                    val shadowRadius by animateFloatAsState(
+                        targetValue = if (isActive && wordAnimation == 3) 16f else 8f,
+                        label = "GlowAnim"
+                    )
+                    
+                    val color by animateColorAsState(
+                        targetValue = when {
+                            isActive -> Color(activeWordColor)
+                            isPassed -> Color(activeLineColor)
+                            else -> Color(inactiveLineColor)
+                        },
+                        label = "ColorAnim"
+                    )
+
+                    Text(
+                        text = word.text + if (word.hasTrailingSpace) " " else "",
+                        color = color,
+                        style = TextStyle(
+                            fontSize = effectiveFontSize.sp,
+                            fontWeight = if (isActive) FontWeight.ExtraBold else FontWeight.Bold,
+                            fontStyle = if (agentKey == "bg") androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal,
+                            shadow = Shadow(
+                                color = if (isActive && wordAnimation == 3) Color(activeWordColor) else Color.Black,
+                                offset = Offset(2f, 2f),
+                                blurRadius = shadowRadius
+                            )
+                        ),
+                        modifier = Modifier.graphicsLayer {
+                            scaleX = scale
+                            scaleY = scale
+                        }
+                    )
                 }
-            )
+            }
         }
     }
 }

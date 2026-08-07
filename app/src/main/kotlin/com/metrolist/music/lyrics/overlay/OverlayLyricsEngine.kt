@@ -26,7 +26,8 @@ data class OverlayLyricWord(
     val startTimeMs: Long,
     val endTimeMs: Long,
     val hasTrailingSpace: Boolean,
-    val isBackground: Boolean = false
+    val isBackground: Boolean = false,
+    val agent: String? = null
 )
 
 data class OverlayLyricLine(
