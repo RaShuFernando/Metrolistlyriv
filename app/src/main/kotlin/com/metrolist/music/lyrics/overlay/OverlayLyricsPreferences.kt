@@ -128,4 +128,18 @@ object OverlayLyricsPreferences {
             prefs[KEY_INACTIVE_LINE_COLOR] = color
         }
     }
+
+    private val KEY_BACKGROUND_COLOR = androidx.datastore.preferences.core.intPreferencesKey("overlay_background_color")
+
+    fun getBackgroundColor(context: Context): Flow<Int> {
+        return context.dataStore.data.map { prefs ->
+            prefs[KEY_BACKGROUND_COLOR] ?: android.graphics.Color.TRANSPARENT
+        }
+    }
+
+    suspend fun setBackgroundColor(context: Context, color: Int) {
+        context.safeDataStoreEdit { prefs ->
+            prefs[KEY_BACKGROUND_COLOR] = color
+        }
+    }
 }

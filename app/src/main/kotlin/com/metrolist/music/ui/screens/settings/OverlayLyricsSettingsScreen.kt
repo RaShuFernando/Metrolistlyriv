@@ -87,6 +87,7 @@ fun OverlayLyricsSettingsScreen(
     val activeWordColor by OverlayLyricsPreferences.getActiveWordColor(context).collectAsState(initial = android.graphics.Color.parseColor("#FFD700"))
     val activeLineColor by OverlayLyricsPreferences.getActiveLineColor(context).collectAsState(initial = android.graphics.Color.WHITE)
     val inactiveLineColor by OverlayLyricsPreferences.getInactiveLineColor(context).collectAsState(initial = android.graphics.Color.parseColor("#A6FFFFFF"))
+    val backgroundColor by OverlayLyricsPreferences.getBackgroundColor(context).collectAsState(initial = android.graphics.Color.TRANSPARENT)
     
     var showLineAnimationDialog by remember { mutableStateOf(false) }
     var showWordAnimationDialog by remember { mutableStateOf(false) }
@@ -235,6 +236,12 @@ fun OverlayLyricsSettingsScreen(
                         title = { Text(stringResource(R.string.overlay_lyrics_inactive_line_color)) },
                         description = { Text("Choose color for the inactive lines") },
                         onClick = { activeColorDialog = "inactiveLine" }
+                    ),
+                    Material3SettingsItem(
+                        icon = painterResource(R.drawable.palette),
+                        title = { Text("Background Color") },
+                        description = { Text("Choose background color for the overlay") },
+                        onClick = { activeColorDialog = "background" }
                     )
                 )
             )
@@ -429,7 +436,7 @@ fun OverlayLyricsSettingsScreen(
                 title = { Text(stringResource(R.string.overlay_lyrics_word_animation)) },
                 text = {
                     Column {
-                        val options = listOf("None", "Color Fill", "Spring Scale", "Glow")
+                        val options = listOf("None", "Color Fill", "Spring Scale", "Glow", "Color Fill & Scale")
                         options.forEachIndexed { index, option ->
                             Row(
                                 modifier = Modifier.fillMaxWidth().clickable {
@@ -449,35 +456,78 @@ fun OverlayLyricsSettingsScreen(
         }
 
         if (activeColorDialog != null) {
+            val initialColor = when (activeColorDialog) {
+                "activeWord" -> activeWordColor
+                "activeLine" -> activeLineColor
+                "inactiveLine" -> inactiveLineColor
+                "background" -> backgroundColor
+                else -> android.graphics.Color.WHITE
+            }
+            
+            var alpha by remember(initialColor) { mutableStateOf(android.graphics.Color.alpha(initialColor) / 255f) }
+            var red by remember(initialColor) { mutableStateOf(android.graphics.Color.red(initialColor) / 255f) }
+            var green by remember(initialColor) { mutableStateOf(android.graphics.Color.green(initialColor) / 255f) }
+            var blue by remember(initialColor) { mutableStateOf(android.graphics.Color.blue(initialColor) / 255f) }
+            
+            val currentColor = Color(red, green, blue, alpha)
+
             AlertDialog(
                 onDismissRequest = { activeColorDialog = null },
-                title = { Text("Choose Color") },
+                title = { Text("Custom Color Picker") },
                 text = {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceEvenly
+                    Column(
+                        modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        colorPalette.forEach { colorInt ->
-                            Box(
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(colorInt))
-                                    .clickable {
-                                        coroutineScope.launch {
-                                            when (activeColorDialog) {
-                                                "activeWord" -> OverlayLyricsPreferences.setActiveWordColor(context, colorInt)
-                                                "activeLine" -> OverlayLyricsPreferences.setActiveLineColor(context, colorInt)
-                                                "inactiveLine" -> OverlayLyricsPreferences.setInactiveLineColor(context, colorInt)
-                                            }
-                                            activeColorDialog = null
-                                        }
-                                    }
-                            )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(60.dp)
+                                .clip(MaterialTheme.shapes.medium)
+                                .background(Color.LightGray)
+                        ) {
+                            Box(modifier = Modifier.matchParentSize().background(currentColor))
                         }
+                        
+                        Text("Opacity (Alpha): ${(alpha * 100).toInt()}%")
+                        Slider(value = alpha, onValueChange = { alpha = it })
+                        
+                        Text("Red: ${(red * 255).toInt()}")
+                        Slider(value = red, onValueChange = { red = it })
+                        
+                        Text("Green: ${(green * 255).toInt()}")
+                        Slider(value = green, onValueChange = { green = it })
+                        
+                        Text("Blue: ${(blue * 255).toInt()}")
+                        Slider(value = blue, onValueChange = { blue = it })
                     }
                 },
-                confirmButton = { TextButton(onClick = { activeColorDialog = null }) { Text(stringResource(R.string.close)) } }
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            val colorInt = android.graphics.Color.argb(
+                                (alpha * 255).toInt(),
+                                (red * 255).toInt(),
+                                (green * 255).toInt(),
+                                (blue * 255).toInt()
+                            )
+                            coroutineScope.launch {
+                                when (activeColorDialog) {
+                                    "activeWord" -> OverlayLyricsPreferences.setActiveWordColor(context, colorInt)
+                                    "activeLine" -> OverlayLyricsPreferences.setActiveLineColor(context, colorInt)
+                                    "inactiveLine" -> OverlayLyricsPreferences.setInactiveLineColor(context, colorInt)
+                                    "background" -> OverlayLyricsPreferences.setBackgroundColor(context, colorInt)
+                                }
+                                activeColorDialog = null
+                            }
+                        }
+                    ) {
+                        Text("Save")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { activeColorDialog = null }) { Text(stringResource(R.string.close)) }
+                }
             )
         }
     }
