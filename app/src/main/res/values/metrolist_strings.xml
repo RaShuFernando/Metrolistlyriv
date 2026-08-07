@@ -1049,7 +1049,7 @@
     <string name="overlay_lyrics_word_animation">Word Sync Animation</string>
     <string name="overlay_lyrics_word_animation_desc">Animation when individual words become active</string>
     <string name="customize_animations">Animations</string>
-    <string name="customize_colors">Colors</string>
+
     <string name="overlay_lyrics_active_word_color">Active Word Color</string>
     <string name="overlay_lyrics_active_line_color">Active Line Color</string>
     <string name="overlay_lyrics_inactive_line_color">Inactive Line Color</string>
