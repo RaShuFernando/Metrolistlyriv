@@ -173,15 +173,6 @@ class TtmlLyricParser(private val isGoLyrics: Boolean = false) : LyricParser {
                 fixedLineEndTime = line.words.lastOrNull()?.endTimeMs?.takeIf { it > line.startTimeMs } ?: nextLineStartTime
             }
             
-            // To prevent the lyrics from prematurely vanishing, we ensure the line stays active
-            // until the next line begins, but we cap this extension to 10 seconds after the last word.
-            val maxWordEnd = line.words.maxOfOrNull { it.endTimeMs }?.takeIf { it > line.startTimeMs } ?: fixedLineEndTime
-            val desiredEndTime = nextLineStartTime.coerceAtMost(maxWordEnd + 10000L)
-            
-            if (fixedLineEndTime < desiredEndTime) {
-                fixedLineEndTime = desiredEndTime
-            }
-            
             // For words, ensure they have valid end times
             val fixedWords = line.words.mapIndexed { j, word ->
                 var fixedWordEndTime = word.endTimeMs
@@ -199,13 +190,18 @@ class TtmlLyricParser(private val isGoLyrics: Boolean = false) : LyricParser {
                 word.copy(endTimeMs = fixedWordEndTime)
             }
             
-            // Also ensure the line itself has a minimum duration and encompasses its words
+            // Ensure the line itself has a minimum duration and encompasses its words
             val maxWordEnd = fixedWords.maxOfOrNull { it.endTimeMs } ?: fixedLineEndTime
             if (fixedLineEndTime < maxWordEnd) {
                 fixedLineEndTime = maxWordEnd
             }
             
-            // If the next line is very far away, we don't necessarily want it to stay forever, but we ensure it doesn't vanish prematurely.
+            // To prevent the lyrics from prematurely vanishing, we ensure the line stays active
+            // until the next line begins, but we cap this extension to 10 seconds after the last word.
+            val desiredEndTime = nextLineStartTime.coerceAtMost(maxWordEnd + 10000L)
+            if (fixedLineEndTime < desiredEndTime) {
+                fixedLineEndTime = desiredEndTime
+            }
             
             lines[i] = line.copy(
                 endTimeMs = fixedLineEndTime,
