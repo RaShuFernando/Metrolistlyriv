@@ -370,18 +370,6 @@ fun OverlayLyricsView(
     activeLineColor: Int,
     inactiveLineColor: Int
 ) {
-    val activeLinesWindow by androidx.compose.runtime.remember(overlayLyrics.lines) {
-        androidx.compose.runtime.derivedStateOf {
-            val positionMs = currentPositionProvider()
-            val lines = overlayLyrics.lines
-            if (lines.isEmpty()) emptyList()
-            else {
-                // 2000ms buffer to allow exit animations to complete before removing from composition
-                lines.filter { it.startTimeMs <= positionMs + 2000 && it.endTimeMs >= positionMs - 2000 }
-            }
-        }
-    }
-    
     val backgroundColor by OverlayLyricsPreferences.getBackgroundColor(LocalContext.current)
         .collectAsState(initial = android.graphics.Color.TRANSPARENT)
 
@@ -411,11 +399,22 @@ fun OverlayLyricsView(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            activeLinesWindow.forEach { line ->
-                val isLineActive by androidx.compose.runtime.remember { androidx.compose.runtime.derivedStateOf { currentPositionProvider() in line.startTimeMs..line.endTimeMs } }
+            val positionMs = currentPositionProvider()
+            val windowLines = overlayLyrics.lines.filter { 
+                it.startTimeMs <= positionMs + 4000 && it.endTimeMs >= positionMs - 3000 
+            }
+            
+            windowLines.forEach { line ->
+                val isLineVisible by androidx.compose.runtime.remember { 
+                    androidx.compose.runtime.derivedStateOf { 
+                        val pos = currentPositionProvider()
+                        pos in line.startTimeMs..line.endTimeMs
+                    } 
+                }
+                
                 androidx.compose.runtime.key(line.startTimeMs) {
                     androidx.compose.animation.AnimatedVisibility(
-                        visible = isLineActive,
+                        visible = isLineVisible,
                         enter = enterTransition,
                         exit = exitTransition
                     ) {
@@ -490,7 +489,7 @@ fun WordSyncedLyricLine(
         }
     }
 
-    Box(modifier = Modifier.fillMaxWidth()) {
+    Column(modifier = Modifier.fillMaxWidth()) {
         groupedWords.forEach { (agentKey, agentWords) ->
             val textAlign = when (agentKey) {
                 "bg", "v2" -> TextAlign.Right

@@ -229,6 +229,10 @@ object LyricsSyncManager {
         val masterPath = getMasterFolderPath()
         val vaultManager = VaultManager(masterPath)
         val db = DatabaseProvider.getDatabase(context, masterPath)
+
+        // Clear the database completely to prevent duplicate entries and stale data
+        db.clearAllTables()
+
         val dao = db.libraryDao()
 
         val lyricsDatabaseDir = File(masterPath, "LyricsDatabase")
