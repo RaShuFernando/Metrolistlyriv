@@ -33,6 +33,7 @@ import com.metrolist.innertube.models.SongItem
 import com.metrolist.innertube.models.filterExplicit
 import com.metrolist.innertube.models.filterVideoSongs
 import com.metrolist.music.R
+import com.metrolist.music.constants.AndroidAutoSearchLocalLimitKey
 import com.metrolist.music.constants.HideExplicitKey
 import com.metrolist.music.constants.HideVideoSongsKey
 import com.metrolist.music.constants.MediaSessionConstants
@@ -62,9 +63,13 @@ import kotlinx.coroutines.plus
 import javax.inject.Inject
 import com.metrolist.music.constants.AndroidAutoSectionsOrderKey
 import com.metrolist.music.constants.AndroidAutoYouTubePlaylistsKey
+import com.metrolist.music.constants.AutoRadioQueueKey
+import com.metrolist.music.playback.queues.ListQueue
+import com.metrolist.music.playback.queues.YouTubeQueue
 import com.metrolist.music.ui.screens.settings.AndroidAutoSection
 import com.metrolist.music.ui.screens.settings.deserializeSections
 import com.metrolist.music.ui.screens.settings.serializeSections
+import kotlinx.coroutines.withContext
 
 class MediaLibrarySessionCallback
 @Inject
@@ -492,28 +497,9 @@ constructor(
 
             try {
                 val searchResults = mutableListOf<MediaItem>()
+                val limit = context.dataStore.get(AndroidAutoSearchLocalLimitKey, 75)
 
-                val localSongs = database.allSongs().first().filter { song ->
-                    song.song.title.contains(query, ignoreCase = true) ||
-                    song.artists.any { it.name.contains(query, ignoreCase = true) } ||
-                    song.album?.title?.contains(query, ignoreCase = true) == true
-                }
-                
-                val artistSongs = database.searchArtists(query).first().flatMap { artist ->
-                    database.artistSongsByCreateDateAsc(artist.id).first()
-                }
-                
-                val albumSongs = database.searchAlbums(query).first().flatMap { album ->
-                    database.albumSongs(album.id).first()
-                }
-                
-                val playlistSongs = database.searchPlaylists(query).first().flatMap { playlist ->
-                    database.playlistSongs(playlist.id).first().map { it.song }
-                }
-
-                val allLocalSongs = (localSongs + artistSongs + albumSongs + playlistSongs)
-                    .distinctBy { it.id }
-                
+                val allLocalSongs = database.searchSongsExtended(query, limit).first()
                 allLocalSongs.forEach { song ->
                     searchResults.add(song.toMediaItem(
                         path = "${MusicService.SEARCH}/$query",
@@ -721,31 +707,15 @@ constructor(
                             }
                         }
                     }
-                    
+
                     val searchResults = mutableListOf<Song>()
+                    val limit = context.dataStore.get(AndroidAutoSearchLocalLimitKey, 75)
 
-                    val localSongs = database.allSongs().first().filter { song ->
-                        song.song.title.contains(searchQuery, ignoreCase = true) ||
-                        song.artists.any { it.name.contains(searchQuery, ignoreCase = true) } ||
-                        song.album?.title?.contains(searchQuery, ignoreCase = true) == true
-                    }
-                    
-                    val artistSongs = database.searchArtists(searchQuery).first().flatMap { artist ->
-                        database.artistSongsByCreateDateAsc(artist.id).first()
-                    }
-                    
-                    val albumSongs = database.searchAlbums(searchQuery).first().flatMap { album ->
-                        database.albumSongs(album.id).first()
-                    }
-                    
-                    val playlistSongs = database.searchPlaylists(searchQuery).first().flatMap { playlist ->
-                        database.playlistSongs(playlist.id).first().map { it.song }
-                    }
-
-                    val allLocalSongs = (localSongs + artistSongs + albumSongs + playlistSongs)
-                        .distinctBy { it.id }
-                    
+                    val allLocalSongs = database.searchSongsExtended(searchQuery, limit).first()
                     searchResults.addAll(allLocalSongs)
+                    if (!isVoiceSearch && songId.isNotBlank() && searchResults.indexOfFirst { it.id == songId } == -1) {
+                        database.song(songId).first()?.let { searchResults.add(it) }
+                    }
                     
                     try {
                         val onlineResults = YouTube.search(searchQuery, YouTube.SearchFilter.FILTER_SONG)
@@ -783,24 +753,51 @@ constructor(
                         return@future defaultResult
                     }
 
-                    //Check if the voiceQuery is about a specific song and plays only that
-                    if (isVoiceSearch) {
-                        val snapshot: List<Song> = synchronized(searchResults) { searchResults.toList() }
-                        val bestMatch = VoiceSearchMatcher.findBest(searchQuery, snapshot)
-                        if (bestMatch != null) {
+                    val selectedSong =
+                        if (isVoiceSearch) {    //Check if the voiceQuery is about a specific song
+                            val snapshot: List<Song> =
+                                synchronized(searchResults) { searchResults.toList() }
+                            VoiceSearchMatcher.findBest(searchQuery, snapshot)
+                        } else {
+                            searchResults.firstOrNull { it.id == songId }
+                        }
+
+                    if(context.dataStore.get(AutoRadioQueueKey, true)) {
+                        val radioQueue = YouTubeQueue.radio(selectedSong?.toMediaMetadata() ?: return@future defaultResult)
+                        val radioStatus = runCatching {
+                            withContext(Dispatchers.IO) {
+                                radioQueue
+                                    .getInitialStatus()
+                                    .filterExplicit(context.dataStore.get(HideExplicitKey, false))
+                                    .filterVideoSongs(context.dataStore.get(HideVideoSongsKey, false))
+                            }
+                        }.getOrNull()
+
+                        if (radioStatus != null && radioStatus.items.isNotEmpty()) {
+                            withContext(Dispatchers.Main) {
+                                service.adoptQueue(radioQueue, radioStatus.title, radioStatus.items.size) //Used to make the radio queue load more songs when near the end
+                            }
                             return@future MediaItemsWithStartPosition(
-                                listOf(bestMatch.toMediaItem()),
-                                0,
+                                radioStatus.items,
+                                radioStatus.items.indexOfFirst { it.mediaId == selectedSong.id }.coerceAtLeast(0),
                                 C.TIME_UNSET,
                             )
                         }
                     }
 
-                    val targetIndex = searchResults.indexOfFirst { it.id == songId }
-
+                    val items = listOf(selectedSong?.toMediaItem() ?: return@future defaultResult)
+                    withContext(Dispatchers.Main) {
+                        service.adoptQueue(
+                            ListQueue(
+                                title = selectedSong.song.title,
+                                items = items,
+                            ),
+                            title = selectedSong.song.title,
+                        )
+                    }
                     MediaItemsWithStartPosition(
-                        searchResults.map { it.toMediaItem() },
-                        if (targetIndex >= 0) targetIndex else 0,
+                        items,
+                        0,
                         C.TIME_UNSET
                     )
                 }
