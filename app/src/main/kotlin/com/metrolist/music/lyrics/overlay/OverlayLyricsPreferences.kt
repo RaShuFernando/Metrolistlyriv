@@ -62,4 +62,70 @@ object OverlayLyricsPreferences {
             prefs[KEY_LYRICS_PREFETCH_COUNT] = count.coerceIn(1, 20)
         }
     }
+
+    private val KEY_LINE_ANIMATION = androidx.datastore.preferences.core.intPreferencesKey("overlay_line_animation")
+    private val KEY_WORD_ANIMATION = androidx.datastore.preferences.core.intPreferencesKey("overlay_word_animation")
+    private val KEY_ACTIVE_WORD_COLOR = androidx.datastore.preferences.core.intPreferencesKey("overlay_active_word_color")
+    private val KEY_ACTIVE_LINE_COLOR = androidx.datastore.preferences.core.intPreferencesKey("overlay_active_line_color")
+    private val KEY_INACTIVE_LINE_COLOR = androidx.datastore.preferences.core.intPreferencesKey("overlay_inactive_line_color")
+
+    fun getLineAnimation(context: Context): Flow<Int> {
+        return context.dataStore.data.map { prefs ->
+            prefs[KEY_LINE_ANIMATION] ?: 2 // Default: Slide Up
+        }
+    }
+
+    suspend fun setLineAnimation(context: Context, value: Int) {
+        context.safeDataStoreEdit { prefs ->
+            prefs[KEY_LINE_ANIMATION] = value
+        }
+    }
+
+    fun getWordAnimation(context: Context): Flow<Int> {
+        return context.dataStore.data.map { prefs ->
+            prefs[KEY_WORD_ANIMATION] ?: 2 // Default: Spring Scale
+        }
+    }
+
+    suspend fun setWordAnimation(context: Context, value: Int) {
+        context.safeDataStoreEdit { prefs ->
+            prefs[KEY_WORD_ANIMATION] = value
+        }
+    }
+
+    fun getActiveWordColor(context: Context): Flow<Int> {
+        return context.dataStore.data.map { prefs ->
+            prefs[KEY_ACTIVE_WORD_COLOR] ?: android.graphics.Color.parseColor("#FFD700")
+        }
+    }
+
+    suspend fun setActiveWordColor(context: Context, color: Int) {
+        context.safeDataStoreEdit { prefs ->
+            prefs[KEY_ACTIVE_WORD_COLOR] = color
+        }
+    }
+
+    fun getActiveLineColor(context: Context): Flow<Int> {
+        return context.dataStore.data.map { prefs ->
+            prefs[KEY_ACTIVE_LINE_COLOR] ?: android.graphics.Color.WHITE
+        }
+    }
+
+    suspend fun setActiveLineColor(context: Context, color: Int) {
+        context.safeDataStoreEdit { prefs ->
+            prefs[KEY_ACTIVE_LINE_COLOR] = color
+        }
+    }
+
+    fun getInactiveLineColor(context: Context): Flow<Int> {
+        return context.dataStore.data.map { prefs ->
+            prefs[KEY_INACTIVE_LINE_COLOR] ?: android.graphics.Color.parseColor("#A6FFFFFF") // ~65% white
+        }
+    }
+
+    suspend fun setInactiveLineColor(context: Context, color: Int) {
+        context.safeDataStoreEdit { prefs ->
+            prefs[KEY_INACTIVE_LINE_COLOR] = color
+        }
+    }
 }

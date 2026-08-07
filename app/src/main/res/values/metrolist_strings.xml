@@ -1043,5 +1043,15 @@
     <string name="no_versions_found">No lyric versions found for current song</string>
     <string name="prefetch_upcoming_lyrics">Pre-fetch Upcoming Lyrics</string>
     <string name="prefetch_upcoming_lyrics_desc">Automatically download and save lyrics for the next 10 songs in the queue.</string>
+    
+    <string name="overlay_lyrics_line_animation">Line Sync Animation</string>
+    <string name="overlay_lyrics_line_animation_desc">Animation when the active line changes</string>
+    <string name="overlay_lyrics_word_animation">Word Sync Animation</string>
+    <string name="overlay_lyrics_word_animation_desc">Animation when individual words become active</string>
+    <string name="customize_animations">Animations</string>
+    <string name="customize_colors">Colors</string>
+    <string name="overlay_lyrics_active_word_color">Active Word Color</string>
+    <string name="overlay_lyrics_active_line_color">Active Line Color</string>
+    <string name="overlay_lyrics_inactive_line_color">Inactive Line Color</string>
 </resources>
 

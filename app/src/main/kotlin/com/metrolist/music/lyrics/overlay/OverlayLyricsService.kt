@@ -235,6 +235,16 @@ class OverlayLyricsService : Service() {
                     .collectAsState(initial = 18f)
                 val enabled by OverlayLyricsPreferences.getOverlayEnabled(this@OverlayLyricsService)
                     .collectAsState(initial = true)
+                val lineAnimation by OverlayLyricsPreferences.getLineAnimation(this@OverlayLyricsService)
+                    .collectAsState(initial = 2)
+                val wordAnimation by OverlayLyricsPreferences.getWordAnimation(this@OverlayLyricsService)
+                    .collectAsState(initial = 2)
+                val activeWordColor by OverlayLyricsPreferences.getActiveWordColor(this@OverlayLyricsService)
+                    .collectAsState(initial = android.graphics.Color.parseColor("#FFD700"))
+                val activeLineColor by OverlayLyricsPreferences.getActiveLineColor(this@OverlayLyricsService)
+                    .collectAsState(initial = android.graphics.Color.WHITE)
+                val inactiveLineColor by OverlayLyricsPreferences.getInactiveLineColor(this@OverlayLyricsService)
+                    .collectAsState(initial = android.graphics.Color.parseColor("#A6FFFFFF"))
 
                 if (enabled) {
                     AnimatedVisibility(
@@ -249,7 +259,12 @@ class OverlayLyricsService : Service() {
                                 OverlayLyricsView(
                                     overlayLyrics = lyrics,
                                     currentPositionProvider = currentPositionProvider,
-                                    fontSizeSp = fontSizeSp
+                                    fontSizeSp = fontSizeSp,
+                                    lineAnimation = lineAnimation,
+                                    wordAnimation = wordAnimation,
+                                    activeWordColor = activeWordColor,
+                                    activeLineColor = activeLineColor,
+                                    inactiveLineColor = inactiveLineColor
                                 )
                             }
                         }
@@ -347,7 +362,12 @@ class OverlayLyricsService : Service() {
 fun OverlayLyricsView(
     overlayLyrics: ParsedOverlayLyrics,
     currentPositionProvider: () -> Long,
-    fontSizeSp: Float
+    fontSizeSp: Float,
+    lineAnimation: Int,
+    wordAnimation: Int,
+    activeWordColor: Int,
+    activeLineColor: Int,
+    inactiveLineColor: Int
 ) {
     val activeLines by androidx.compose.runtime.remember(overlayLyrics.lines) {
         androidx.compose.runtime.derivedStateOf {
@@ -366,47 +386,65 @@ fun OverlayLyricsView(
             .padding(16.dp),
         contentAlignment = Alignment.Center
     ) {
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            activeLines.forEach { line ->
-                if (line.text.isNotBlank()) {
-                    val hasWordTimestamps = line.words.isNotEmpty()
+        androidx.compose.animation.AnimatedContent(
+            targetState = activeLines,
+            transitionSpec = {
+                when (lineAnimation) {
+                    1 -> fadeIn() togetherWith fadeOut()
+                    2 -> slideInVertically { it } + fadeIn() togetherWith slideOutVertically { -it } + fadeOut()
+                    3 -> androidx.compose.animation.scaleIn() + fadeIn() togetherWith androidx.compose.animation.scaleOut() + fadeOut()
+                    4 -> fadeIn() togetherWith fadeOut() // Blur modifier not easily transitioned natively without custom code, fallback to fade
+                    else -> androidx.compose.animation.EnterTransition.None togetherWith androidx.compose.animation.ExitTransition.None
+                }
+            },
+            label = "ActiveLinesAnim"
+        ) { linesToRender ->
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                linesToRender.forEach { line ->
+                    if (line.text.isNotBlank()) {
+                        val hasWordTimestamps = line.words.isNotEmpty()
 
-                    if (hasWordTimestamps) {
-                        WordSyncedLyricLine(
-                            line = line,
-                            currentPositionProvider = currentPositionProvider,
-                            fontSizeSp = fontSizeSp
-                        )
-                    } else {
-                        val isBg = line.isBackground
-                        val textAlign = when {
-                            isBg -> TextAlign.Right
-                            line.agent == "v2" -> TextAlign.Right
-                            else -> TextAlign.Start
+                        if (hasWordTimestamps) {
+                            WordSyncedLyricLine(
+                                line = line,
+                                currentPositionProvider = currentPositionProvider,
+                                fontSizeSp = fontSizeSp,
+                                wordAnimation = wordAnimation,
+                                activeWordColor = activeWordColor,
+                                activeLineColor = activeLineColor,
+                                inactiveLineColor = inactiveLineColor
+                            )
+                        } else {
+                            val isBg = line.isBackground
+                            val textAlign = when {
+                                isBg -> TextAlign.Right
+                                line.agent == "v2" -> TextAlign.Right
+                                else -> TextAlign.Start
+                            }
+                            val effectiveFontSize = if (isBg) fontSizeSp * 0.85f else fontSizeSp
+                            val baseColor = Color(activeLineColor)
+                            val finalColor = if (isBg) baseColor.copy(alpha = 0.65f) else baseColor
+
+                            Text(
+                                text = line.text,
+                                style = TextStyle(
+                                    fontSize = effectiveFontSize.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontStyle = if (isBg) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal,
+                                    color = finalColor,
+                                    textAlign = textAlign,
+                                    shadow = Shadow(
+                                        color = Color.Black,
+                                        offset = Offset(2f, 2f),
+                                        blurRadius = 8f
+                                    )
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
                         }
-                        val effectiveFontSize = if (isBg) fontSizeSp * 0.85f else fontSizeSp
-                        val baseColor = if (line.agent == "v2") Color(0xFF00E5FF) else Color.White
-                        val finalColor = if (isBg) baseColor.copy(alpha = 0.65f) else baseColor
-
-                        Text(
-                            text = line.text,
-                            style = TextStyle(
-                                fontSize = effectiveFontSize.sp,
-                                fontWeight = FontWeight.Bold,
-                                fontStyle = if (isBg) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal,
-                                color = finalColor,
-                                textAlign = textAlign,
-                                shadow = Shadow(
-                                    color = Color.Black,
-                                    offset = Offset(2f, 2f),
-                                    blurRadius = 8f
-                                )
-                            ),
-                            modifier = Modifier.fillMaxWidth()
-                        )
                     }
                 }
             }
@@ -418,7 +456,11 @@ fun OverlayLyricsView(
 fun WordSyncedLyricLine(
     line: OverlayLyricLine,
     currentPositionProvider: () -> Long,
-    fontSizeSp: Float
+    fontSizeSp: Float,
+    wordAnimation: Int,
+    activeWordColor: Int,
+    activeLineColor: Int,
+    inactiveLineColor: Int
 ) {
     val words = line.words
 
@@ -430,7 +472,6 @@ fun WordSyncedLyricLine(
         else -> TextAlign.Start
     }
     val effectiveFontSize = if (isBg) fontSizeSp * 0.85f else fontSizeSp
-    val baseColor = if (line.agent == "v2") Color(0xFF00E5FF) else Color.White
 
     androidx.compose.foundation.layout.FlowRow(
         modifier = Modifier.fillMaxWidth(),
@@ -440,15 +481,24 @@ fun WordSyncedLyricLine(
             val isActive by androidx.compose.runtime.remember { androidx.compose.runtime.derivedStateOf { currentPositionProvider() in word.startTimeMs..word.endTimeMs } }
             val isPassed by androidx.compose.runtime.remember { androidx.compose.runtime.derivedStateOf { currentPositionProvider() > word.endTimeMs } }
 
-            val scale by animateFloatAsState(targetValue = if (isActive) 1.1f else 1.0f, label = "ScaleAnim")
+            val scale by animateFloatAsState(
+                targetValue = if (isActive && wordAnimation == 2) 1.15f else 1.0f,
+                animationSpec = if (wordAnimation == 2) androidx.compose.animation.core.spring(dampingRatio = 0.5f, stiffness = 500f) else androidx.compose.animation.core.tween(),
+                label = "ScaleAnim"
+            )
             
             val wordFontSize = if (word.isBackground) effectiveFontSize * 0.85f else effectiveFontSize
             
+            val shadowRadius by animateFloatAsState(
+                targetValue = if (isActive && wordAnimation == 3) 16f else 8f,
+                label = "GlowAnim"
+            )
+            
             val color by animateColorAsState(
                 targetValue = when {
-                    isActive -> Color(0xFFFFD700) // Vibrant Gold highlight
-                    isPassed -> baseColor
-                    else -> baseColor.copy(alpha = if (word.isBackground || isBg) 0.65f else 0.6f)
+                    isActive -> Color(activeWordColor)
+                    isPassed -> Color(activeLineColor)
+                    else -> Color(inactiveLineColor)
                 },
                 label = "ColorAnim"
             )
@@ -461,9 +511,9 @@ fun WordSyncedLyricLine(
                     fontWeight = if (isActive) FontWeight.ExtraBold else FontWeight.Bold,
                     fontStyle = if (word.isBackground || isBg) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal,
                     shadow = Shadow(
-                        color = Color.Black,
+                        color = if (isActive && wordAnimation == 3) Color(activeWordColor) else Color.Black,
                         offset = Offset(2f, 2f),
-                        blurRadius = 8f
+                        blurRadius = shadowRadius
                     )
                 ),
                 modifier = Modifier.graphicsLayer {

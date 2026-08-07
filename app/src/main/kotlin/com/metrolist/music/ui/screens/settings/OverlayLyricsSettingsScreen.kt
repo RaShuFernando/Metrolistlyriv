@@ -41,6 +41,13 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.ui.draw.clip
 import com.metrolist.music.LocalPlayerAwareWindowInsets
 import com.metrolist.music.R
 import com.metrolist.music.lyrics.overlay.OverlayLyricsEngine
@@ -74,6 +81,27 @@ fun OverlayLyricsSettingsScreen(
     var availableVersions by remember { mutableStateOf<List<LyricFileInfo>>(emptyList()) }
     var activeFilename by remember { mutableStateOf<String?>(null) }
     var parsedVaultDir by remember { mutableStateOf<File?>(null) }
+    
+    val lineAnimation by OverlayLyricsPreferences.getLineAnimation(context).collectAsState(initial = 2)
+    val wordAnimation by OverlayLyricsPreferences.getWordAnimation(context).collectAsState(initial = 2)
+    val activeWordColor by OverlayLyricsPreferences.getActiveWordColor(context).collectAsState(initial = android.graphics.Color.parseColor("#FFD700"))
+    val activeLineColor by OverlayLyricsPreferences.getActiveLineColor(context).collectAsState(initial = android.graphics.Color.WHITE)
+    val inactiveLineColor by OverlayLyricsPreferences.getInactiveLineColor(context).collectAsState(initial = android.graphics.Color.parseColor("#A6FFFFFF"))
+    
+    var showLineAnimationDialog by remember { mutableStateOf(false) }
+    var showWordAnimationDialog by remember { mutableStateOf(false) }
+    var activeColorDialog by remember { mutableStateOf<String?>(null) }
+    
+    val colorPalette = remember {
+        listOf(
+            android.graphics.Color.WHITE,
+            android.graphics.Color.parseColor("#FFD700"),
+            android.graphics.Color.parseColor("#00E5FF"),
+            android.graphics.Color.parseColor("#FF4081"),
+            android.graphics.Color.parseColor("#76FF03"),
+            android.graphics.Color.parseColor("#A6FFFFFF")
+        )
+    }
 
     LaunchedEffect(currentVideoId) {
         if (currentVideoId.isBlank()) {
@@ -159,6 +187,54 @@ fun OverlayLyricsSettingsScreen(
                                 }
                             )
                         }
+                    )
+                )
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Animations Section
+            Material3SettingsGroup(
+                title = stringResource(R.string.customize_animations),
+                items = listOf(
+                    Material3SettingsItem(
+                        icon = painterResource(R.drawable.tune), // assuming a generic icon, we can use tune or play_circle
+                        title = { Text(stringResource(R.string.overlay_lyrics_line_animation)) },
+                        description = { Text(stringResource(R.string.overlay_lyrics_line_animation_desc)) },
+                        onClick = { showLineAnimationDialog = true }
+                    ),
+                    Material3SettingsItem(
+                        icon = painterResource(R.drawable.tune),
+                        title = { Text(stringResource(R.string.overlay_lyrics_word_animation)) },
+                        description = { Text(stringResource(R.string.overlay_lyrics_word_animation_desc)) },
+                        onClick = { showWordAnimationDialog = true }
+                    )
+                )
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Colors Section
+            Material3SettingsGroup(
+                title = stringResource(R.string.customize_colors),
+                items = listOf(
+                    Material3SettingsItem(
+                        icon = painterResource(R.drawable.palette), // assuming palette exists
+                        title = { Text(stringResource(R.string.overlay_lyrics_active_word_color)) },
+                        description = { Text("Choose highlight color for the active word") },
+                        onClick = { activeColorDialog = "activeWord" }
+                    ),
+                    Material3SettingsItem(
+                        icon = painterResource(R.drawable.palette),
+                        title = { Text(stringResource(R.string.overlay_lyrics_active_line_color)) },
+                        description = { Text("Choose color for the active line") },
+                        onClick = { activeColorDialog = "activeLine" }
+                    ),
+                    Material3SettingsItem(
+                        icon = painterResource(R.drawable.palette),
+                        title = { Text(stringResource(R.string.overlay_lyrics_inactive_line_color)) },
+                        description = { Text("Choose color for the inactive lines") },
+                        onClick = { activeColorDialog = "inactiveLine" }
                     )
                 )
             )
@@ -319,6 +395,89 @@ fun OverlayLyricsSettingsScreen(
                         Text(stringResource(R.string.close))
                     }
                 }
+            )
+        }
+
+        if (showLineAnimationDialog) {
+            AlertDialog(
+                onDismissRequest = { showLineAnimationDialog = false },
+                title = { Text(stringResource(R.string.overlay_lyrics_line_animation)) },
+                text = {
+                    Column {
+                        val options = listOf("None", "Fade", "Slide Up", "Scale/Zoom", "Blur")
+                        options.forEachIndexed { index, option ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth().clickable {
+                                    coroutineScope.launch { OverlayLyricsPreferences.setLineAnimation(context, index) }
+                                    showLineAnimationDialog = false
+                                }.padding(vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(selected = lineAnimation == index, onClick = null)
+                                Text(text = option, modifier = Modifier.padding(start = 12.dp))
+                            }
+                        }
+                    }
+                },
+                confirmButton = { TextButton(onClick = { showLineAnimationDialog = false }) { Text(stringResource(R.string.close)) } }
+            )
+        }
+
+        if (showWordAnimationDialog) {
+            AlertDialog(
+                onDismissRequest = { showWordAnimationDialog = false },
+                title = { Text(stringResource(R.string.overlay_lyrics_word_animation)) },
+                text = {
+                    Column {
+                        val options = listOf("None", "Color Fill", "Spring Scale", "Glow")
+                        options.forEachIndexed { index, option ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth().clickable {
+                                    coroutineScope.launch { OverlayLyricsPreferences.setWordAnimation(context, index) }
+                                    showWordAnimationDialog = false
+                                }.padding(vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(selected = wordAnimation == index, onClick = null)
+                                Text(text = option, modifier = Modifier.padding(start = 12.dp))
+                            }
+                        }
+                    }
+                },
+                confirmButton = { TextButton(onClick = { showWordAnimationDialog = false }) { Text(stringResource(R.string.close)) } }
+            )
+        }
+
+        if (activeColorDialog != null) {
+            AlertDialog(
+                onDismissRequest = { activeColorDialog = null },
+                title = { Text("Choose Color") },
+                text = {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        colorPalette.forEach { colorInt ->
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(colorInt))
+                                    .clickable {
+                                        coroutineScope.launch {
+                                            when (activeColorDialog) {
+                                                "activeWord" -> OverlayLyricsPreferences.setActiveWordColor(context, colorInt)
+                                                "activeLine" -> OverlayLyricsPreferences.setActiveLineColor(context, colorInt)
+                                                "inactiveLine" -> OverlayLyricsPreferences.setInactiveLineColor(context, colorInt)
+                                            }
+                                            activeColorDialog = null
+                                        }
+                                    }
+                            )
+                        }
+                    }
+                },
+                confirmButton = { TextButton(onClick = { activeColorDialog = null }) { Text(stringResource(R.string.close)) } }
             )
         }
     }

@@ -4,7 +4,7 @@ import android.util.Xml
 import org.xmlpull.v1.XmlPullParser
 import java.io.StringReader
 
-class TtmlLyricParser : LyricParser {
+class TtmlLyricParser(private val isGoLyrics: Boolean = false) : LyricParser {
 
     private fun parseTime(timeStr: String?): Long {
         if (timeStr.isNullOrEmpty()) return 0L
@@ -131,7 +131,7 @@ class TtmlLyricParser : LyricParser {
                                             text = rawText.replace(Regex("\\s+"), " ").trim(),
                                             startTimeMs = state.startTimeMs,
                                             endTimeMs = state.endTimeMs,
-                                            hasTrailingSpace = rawText.lastOrNull()?.isWhitespace() == true,
+                                            hasTrailingSpace = if (isGoLyrics) true else rawText.lastOrNull()?.isWhitespace() == true,
                                             isBackground = state.isBackground
                                         )
                                         
