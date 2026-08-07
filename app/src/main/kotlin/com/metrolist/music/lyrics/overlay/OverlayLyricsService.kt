@@ -500,7 +500,7 @@ fun WordSyncedLyricLine(
             androidx.compose.foundation.layout.FlowRow(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .align(if (textAlign == TextAlign.Right) Alignment.TopEnd else Alignment.TopStart),
+                    .align(if (textAlign == TextAlign.Right) Alignment.End else Alignment.Start),
                 horizontalArrangement = if (textAlign == TextAlign.Right) Arrangement.End else Arrangement.Start
             ) {
                 agentWords.forEach { word ->
