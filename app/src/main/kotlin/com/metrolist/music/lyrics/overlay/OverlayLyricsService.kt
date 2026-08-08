@@ -23,6 +23,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -386,7 +387,7 @@ fun OverlayLyricsView(
         }
 
         Column(
-            modifier = Modifier.fillMaxWidth().androidx.compose.animation.animateContentSize()
+            modifier = Modifier.fillMaxWidth().animateContentSize()
         ) {
             val positionMs = currentPositionProvider()
             val windowLines = overlayLyrics.lines.filter { 
