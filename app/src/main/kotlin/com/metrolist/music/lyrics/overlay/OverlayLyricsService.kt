@@ -371,10 +371,10 @@ fun OverlayLyricsView(
         contentAlignment = Alignment.Center
     ) {
         val enterTransition = when (lineAnimation) {
-            1 -> fadeIn() + androidx.compose.animation.expandVertically(expandFrom = Alignment.Top)
-            2 -> slideInVertically { it } + fadeIn() + androidx.compose.animation.expandVertically(expandFrom = Alignment.Top)
-            3 -> androidx.compose.animation.scaleIn() + fadeIn() + androidx.compose.animation.expandVertically(expandFrom = Alignment.Top)
-            4 -> fadeIn() + androidx.compose.animation.expandVertically(expandFrom = Alignment.Top) // Blur transition fallback
+            1 -> fadeIn()
+            2 -> slideInVertically { it } + fadeIn()
+            3 -> androidx.compose.animation.scaleIn() + fadeIn()
+            4 -> fadeIn() // Blur transition fallback
             else -> androidx.compose.animation.EnterTransition.None
         }
         val exitTransition = when (lineAnimation) {
@@ -386,8 +386,7 @@ fun OverlayLyricsView(
         }
 
         Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            modifier = Modifier.fillMaxWidth().androidx.compose.animation.animateContentSize()
         ) {
             val positionMs = currentPositionProvider()
             val windowLines = overlayLyrics.lines.filter { 
@@ -408,45 +407,47 @@ fun OverlayLyricsView(
                         enter = enterTransition,
                         exit = exitTransition
                     ) {
-                        if (line.text.isNotBlank()) {
-                            val hasWordTimestamps = line.words.isNotEmpty()
-                            if (hasWordTimestamps) {
-                                WordSyncedLyricLine(
-                                    line = line,
-                                    currentPositionProvider = currentPositionProvider,
-                                    fontSizeSp = fontSizeSp,
-                                    wordAnimation = wordAnimation,
-                                    activeWordColor = activeWordColor,
-                                    activeLineColor = activeLineColor,
-                                    inactiveLineColor = inactiveLineColor
-                                )
-                            } else {
-                                val isBg = line.isBackground
-                                val textAlign = when {
-                                    isBg -> TextAlign.Right
-                                    line.agent == "v2" -> TextAlign.Right
-                                    else -> TextAlign.Start
-                                }
-                                val effectiveFontSize = if (isBg) fontSizeSp * 0.85f else fontSizeSp
-                                val baseColor = Color(activeLineColor)
-                                val finalColor = if (isBg) baseColor.copy(alpha = 0.65f) else baseColor
+                        Box(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                            if (line.text.isNotBlank()) {
+                                val hasWordTimestamps = line.words.isNotEmpty()
+                                if (hasWordTimestamps) {
+                                    WordSyncedLyricLine(
+                                        line = line,
+                                        currentPositionProvider = currentPositionProvider,
+                                        fontSizeSp = fontSizeSp,
+                                        wordAnimation = wordAnimation,
+                                        activeWordColor = activeWordColor,
+                                        activeLineColor = activeLineColor,
+                                        inactiveLineColor = inactiveLineColor
+                                    )
+                                } else {
+                                    val isBg = line.isBackground
+                                    val textAlign = when {
+                                        isBg -> TextAlign.Right
+                                        line.agent == "v2" -> TextAlign.Right
+                                        else -> TextAlign.Start
+                                    }
+                                    val effectiveFontSize = if (isBg) fontSizeSp * 0.85f else fontSizeSp
+                                    val baseColor = Color(activeLineColor)
+                                    val finalColor = if (isBg) baseColor.copy(alpha = 0.65f) else baseColor
 
-                                Text(
-                                    text = line.text,
-                                    style = TextStyle(
-                                        fontSize = effectiveFontSize.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        fontStyle = if (isBg) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal,
-                                        color = finalColor,
-                                        textAlign = textAlign,
-                                        shadow = Shadow(
-                                            color = Color.Black,
-                                            offset = Offset(2f, 2f),
-                                            blurRadius = 8f
-                                        )
-                                    ),
-                                    modifier = Modifier.fillMaxWidth()
-                                )
+                                    Text(
+                                        text = line.text,
+                                        style = TextStyle(
+                                            fontSize = effectiveFontSize.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            fontStyle = if (isBg) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal,
+                                            color = finalColor,
+                                            textAlign = textAlign,
+                                            shadow = Shadow(
+                                                color = Color.Black,
+                                                offset = Offset(2f, 2f),
+                                                blurRadius = 8f
+                                            )
+                                        ),
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
                             }
                         }
                     }
