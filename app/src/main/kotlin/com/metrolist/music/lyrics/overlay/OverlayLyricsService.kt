@@ -387,7 +387,7 @@ fun OverlayLyricsView(
         }
 
         Column(
-            modifier = Modifier.fillMaxWidth().animateContentSize()
+            modifier = Modifier.fillMaxWidth()
         ) {
             val positionMs = currentPositionProvider()
             val windowLines = overlayLyrics.lines.filter { 
