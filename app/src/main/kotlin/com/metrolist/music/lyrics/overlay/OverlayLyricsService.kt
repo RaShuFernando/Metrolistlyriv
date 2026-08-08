@@ -220,18 +220,8 @@ class OverlayLyricsService : Service() {
                 val uiState by currentUiState.collectAsState()
                 val isPlaying by isPlaying.collectAsState()
                 
-                // Dedicated Position Ticker that emits to a Compose State
-                val tickerState = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(currentPositionMs.value) }
-                androidx.compose.runtime.LaunchedEffect(isPlaying) {
-                    if (isPlaying) {
-                        while (true) {
-                            tickerState.value = currentPositionMs.value
-                            kotlinx.coroutines.delay(50)
-                        }
-                    }
-                }
-                
-                val currentPositionProvider = { tickerState.value }
+                val positionMs by currentPositionMs.collectAsState()
+                val currentPositionProvider = { positionMs }
                 val fontSizeSp by OverlayLyricsPreferences.getOverlayFontSize(this@OverlayLyricsService)
                     .collectAsState(initial = 18f)
                 val enabled by OverlayLyricsPreferences.getOverlayEnabled(this@OverlayLyricsService)
@@ -405,7 +395,7 @@ fun OverlayLyricsView(
             }
             
             windowLines.forEach { line ->
-                val isLineVisible by androidx.compose.runtime.remember { 
+                val isLineVisible by androidx.compose.runtime.remember(line.startTimeMs, line.endTimeMs) { 
                     androidx.compose.runtime.derivedStateOf { 
                         val pos = currentPositionProvider()
                         pos in line.startTimeMs..line.endTimeMs
@@ -504,8 +494,8 @@ fun WordSyncedLyricLine(
                 horizontalArrangement = if (textAlign == TextAlign.Right) Arrangement.End else Arrangement.Start
             ) {
                 agentWords.forEach { word ->
-                    val isActive by androidx.compose.runtime.remember { androidx.compose.runtime.derivedStateOf { currentPositionProvider() in word.startTimeMs..word.endTimeMs } }
-                    val isPassed by androidx.compose.runtime.remember { androidx.compose.runtime.derivedStateOf { currentPositionProvider() > word.endTimeMs } }
+                    val isActive by androidx.compose.runtime.remember(word.startTimeMs, word.endTimeMs) { androidx.compose.runtime.derivedStateOf { currentPositionProvider() in word.startTimeMs..word.endTimeMs } }
+                    val isPassed by androidx.compose.runtime.remember(word.endTimeMs) { androidx.compose.runtime.derivedStateOf { currentPositionProvider() > word.endTimeMs } }
 
                     val scale by animateFloatAsState(
                         targetValue = if (isActive && (wordAnimation == 2 || wordAnimation == 4)) 1.15f else 1.0f,
