@@ -371,17 +371,17 @@ fun OverlayLyricsView(
         contentAlignment = Alignment.Center
     ) {
         val enterTransition = when (lineAnimation) {
-            1 -> fadeIn()
-            2 -> slideInVertically { it } + fadeIn()
-            3 -> androidx.compose.animation.scaleIn() + fadeIn()
-            4 -> fadeIn() // Blur transition fallback
+            1 -> fadeIn() + androidx.compose.animation.expandVertically(expandFrom = Alignment.Top)
+            2 -> slideInVertically { it } + fadeIn() + androidx.compose.animation.expandVertically(expandFrom = Alignment.Top)
+            3 -> androidx.compose.animation.scaleIn() + fadeIn() + androidx.compose.animation.expandVertically(expandFrom = Alignment.Top)
+            4 -> fadeIn() + androidx.compose.animation.expandVertically(expandFrom = Alignment.Top) // Blur transition fallback
             else -> androidx.compose.animation.EnterTransition.None
         }
         val exitTransition = when (lineAnimation) {
-            1 -> fadeOut()
-            2 -> slideOutVertically { -it } + fadeOut()
-            3 -> androidx.compose.animation.scaleOut() + fadeOut()
-            4 -> fadeOut()
+            1 -> fadeOut() + androidx.compose.animation.shrinkVertically(shrinkTowards = Alignment.Top)
+            2 -> slideOutVertically { -it } + fadeOut() + androidx.compose.animation.shrinkVertically(shrinkTowards = Alignment.Top)
+            3 -> androidx.compose.animation.scaleOut() + fadeOut() + androidx.compose.animation.shrinkVertically(shrinkTowards = Alignment.Top)
+            4 -> fadeOut() + androidx.compose.animation.shrinkVertically(shrinkTowards = Alignment.Top)
             else -> androidx.compose.animation.ExitTransition.None
         }
 
