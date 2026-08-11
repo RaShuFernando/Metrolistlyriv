@@ -59,6 +59,7 @@ import com.metrolist.music.lyrics.vault.LyricsSyncManager
 import com.metrolist.music.lyrics.vault.VaultManager
 import com.metrolist.music.ui.component.Material3SettingsGroup
 import com.metrolist.music.ui.component.Material3SettingsItem
+import com.metrolist.music.ui.utils.ShowOffsetDialog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -81,6 +82,11 @@ fun OverlayLyricsSettingsScreen(
     var availableVersions by remember { mutableStateOf<List<LyricFileInfo>>(emptyList()) }
     var activeFilename by remember { mutableStateOf<String?>(null) }
     var parsedVaultDir by remember { mutableStateOf<File?>(null) }
+    
+    var showOffsetDialogForTrack by remember { mutableStateOf(false) }
+    var trackOffsetMs by remember { mutableStateOf(0L) }
+    var trackVaultDir by remember { mutableStateOf<File?>(null) }
+    var trackActiveFile by remember { mutableStateOf("") }
     
     val lineAnimation by OverlayLyricsPreferences.getLineAnimation(context).collectAsState(initial = 2)
     val wordAnimation by OverlayLyricsPreferences.getWordAnimation(context).collectAsState(initial = 2)
@@ -280,6 +286,49 @@ fun OverlayLyricsSettingsScreen(
                                 Toast.makeText(context, context.getString(R.string.no_song_playing), Toast.LENGTH_SHORT).show()
                             } else {
                                 showVersionDialog = true
+                            }
+                        }
+                    ),
+                    Material3SettingsItem(
+                        icon = painterResource(R.drawable.fast_forward),
+                        title = { Text("Lyric Timing Offset") },
+                        description = { Text("Adjust the lyric timing for the current song") },
+                        onClick = {
+                            if (currentVideoId.isBlank()) {
+                                Toast.makeText(context, "Play a synced song to adjust offset.", Toast.LENGTH_SHORT).show()
+                            } else {
+                                coroutineScope.launch(Dispatchers.IO) {
+                                    val masterPath = LyricsSyncManager.getMasterFolderPath()
+                                    val dao = DatabaseProvider.getDatabase(context, masterPath).libraryDao()
+                                    val index = dao.getSongIndexByVideoId(currentVideoId)
+                                    if (index == null || !File(index.folderPath).exists()) {
+                                        withContext(Dispatchers.Main) {
+                                            Toast.makeText(context, "Play a synced song to adjust offset.", Toast.LENGTH_SHORT).show()
+                                        }
+                                        return@launch
+                                    }
+                                    
+                                    val dir = File(index.folderPath)
+                                    val vaultManager = VaultManager(masterPath)
+                                    val metadata = vaultManager.readMetadataJson(dir)
+                                    val activeFile = metadata?.active_lyric_file ?: metadata?.lyrics?.minByOrNull { it.rank }?.filename
+                                    
+                                    if (metadata == null || activeFile == null) {
+                                        withContext(Dispatchers.Main) {
+                                            Toast.makeText(context, "Play a synced song to adjust offset.", Toast.LENGTH_SHORT).show()
+                                        }
+                                        return@launch
+                                    }
+                                    
+                                    val currentOffset = metadata.lyrics.find { it.filename == activeFile }?.offsetMs ?: 0L
+                                    
+                                    withContext(Dispatchers.Main) {
+                                        trackOffsetMs = currentOffset
+                                        trackVaultDir = dir
+                                        trackActiveFile = activeFile
+                                        showOffsetDialogForTrack = true
+                                    }
+                                }
                             }
                         }
                     )
@@ -528,6 +577,14 @@ fun OverlayLyricsSettingsScreen(
                 dismissButton = {
                     TextButton(onClick = { activeColorDialog = null }) { Text(stringResource(R.string.close)) }
                 }
+            )
+        }
+        if (showOffsetDialogForTrack && trackVaultDir != null && trackActiveFile.isNotEmpty()) {
+            ShowOffsetDialog(
+                currentOffsetMs = trackOffsetMs,
+                parsedVaultDir = trackVaultDir!!,
+                targetFilename = trackActiveFile,
+                onDismiss = { showOffsetDialogForTrack = false }
             )
         }
     }

@@ -230,6 +230,42 @@ class VaultManager(private val masterFolderPath: String) {
         }
     }
 
+    suspend fun updateLyricOffset(
+        parsedVaultDir: File,
+        targetFilename: String,
+        newOffsetMs: Long
+    ): LyricMetadata? = withContext(Dispatchers.IO) {
+        val metadataFile = File(parsedVaultDir, "metadata.json")
+        if (!metadataFile.exists()) return@withContext null
+
+        val content = try { metadataFile.readText() } catch (e: Exception) { return@withContext null }
+        val existing = try { jsonSerializer.decodeFromString(LyricMetadata.serializer(), content) } catch (e: Exception) { return@withContext null }
+
+        val key = existing.videoId.takeIf { it.isNotBlank() } ?: "${existing.artist}_${existing.title}"
+        metadataMutexMap.getOrPut(key) { Mutex() }.withLock {
+            try {
+                val freshContent = metadataFile.readText()
+                val freshExisting = jsonSerializer.decodeFromString(LyricMetadata.serializer(), freshContent)
+                
+                val updatedLyrics = freshExisting.lyrics.map { 
+                    if (it.filename == targetFilename) it.copy(offsetMs = newOffsetMs) else it
+                }
+
+                val updatedMetadata = freshExisting.copy(
+                    lyrics = updatedLyrics,
+                    last_updated = System.currentTimeMillis()
+                )
+                
+                val jsonString = jsonSerializer.encodeToString(LyricMetadata.serializer(), updatedMetadata)
+                metadataFile.writeText(jsonString)
+                updatedMetadata
+            } catch (e: Exception) {
+                FileLogger.e("VaultManager", "Error updating lyric offset in metadata.json", e)
+                null
+            }
+        }
+    }
+
     fun writeMetadataJson(
         parsedVaultDir: File,
         metadata: VaultMetadata,
