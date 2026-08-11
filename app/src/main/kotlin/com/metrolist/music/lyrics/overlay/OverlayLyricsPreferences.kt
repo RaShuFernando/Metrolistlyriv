@@ -63,7 +63,9 @@ object OverlayLyricsPreferences {
         }
     }
 
+    // Line Animations: 1=Fade, 2=SlideUp, 3=Scale, 4=3D Flip (RotateX), 5=Blur Reveal.
     private val KEY_LINE_ANIMATION = androidx.datastore.preferences.core.intPreferencesKey("overlay_line_animation")
+    // Word Animations: 1=None, 2=Scale, 3=Glow, 4=Jump/Lift (TranslateY), 5=Elastic Pop, 6=Karaoke Fill.
     private val KEY_WORD_ANIMATION = androidx.datastore.preferences.core.intPreferencesKey("overlay_word_animation")
     private val KEY_ACTIVE_WORD_COLOR = androidx.datastore.preferences.core.intPreferencesKey("overlay_active_word_color")
     private val KEY_ACTIVE_LINE_COLOR = androidx.datastore.preferences.core.intPreferencesKey("overlay_active_line_color")

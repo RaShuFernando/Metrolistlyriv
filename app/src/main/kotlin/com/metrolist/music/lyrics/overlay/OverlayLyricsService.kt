@@ -54,6 +54,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.draw.blur
+import androidx.compose.animation.core.animateDp
+import androidx.compose.animation.core.animateFloat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
@@ -376,7 +379,8 @@ fun OverlayLyricsView(
             1 -> fadeIn()
             2 -> slideInVertically { it } + fadeIn()
             3 -> androidx.compose.animation.scaleIn() + fadeIn()
-            4 -> fadeIn() // Blur transition fallback
+            4 -> fadeIn() // 3D Flip fallback enter
+            5 -> fadeIn() // Blur Reveal fallback enter
             else -> androidx.compose.animation.EnterTransition.None
         }
         val exitTransition = when (lineAnimation) {
@@ -384,6 +388,7 @@ fun OverlayLyricsView(
             2 -> slideOutVertically { -it } + fadeOut() + androidx.compose.animation.shrinkVertically(shrinkTowards = Alignment.Top)
             3 -> androidx.compose.animation.scaleOut() + fadeOut() + androidx.compose.animation.shrinkVertically(shrinkTowards = Alignment.Top)
             4 -> fadeOut() + androidx.compose.animation.shrinkVertically(shrinkTowards = Alignment.Top)
+            5 -> fadeOut() + androidx.compose.animation.shrinkVertically(shrinkTowards = Alignment.Top)
             else -> androidx.compose.animation.ExitTransition.None
         }
 
@@ -409,7 +414,32 @@ fun OverlayLyricsView(
                         enter = enterTransition,
                         exit = exitTransition
                     ) {
-                        Box(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                        val rotationX by transition.animateFloat(
+                            transitionSpec = { androidx.compose.animation.core.tween() },
+                            label = "rotationX"
+                        ) { enterExitState ->
+                            when (enterExitState) {
+                                androidx.compose.animation.EnterExitState.PreEnter -> -90f
+                                androidx.compose.animation.EnterExitState.Visible -> 0f
+                                androidx.compose.animation.EnterExitState.PostExit -> 90f
+                            }
+                        }
+                        val blurRadius by transition.animateDp(
+                            transitionSpec = { androidx.compose.animation.core.tween() },
+                            label = "blur"
+                        ) { enterExitState ->
+                            when (enterExitState) {
+                                androidx.compose.animation.EnterExitState.PreEnter -> 8.dp
+                                androidx.compose.animation.EnterExitState.Visible -> 0.dp
+                                androidx.compose.animation.EnterExitState.PostExit -> 8.dp
+                            }
+                        }
+                        val customModifier = when (lineAnimation) {
+                            4 -> Modifier.graphicsLayer { this.rotationX = rotationX }
+                            5 -> Modifier.blur(blurRadius)
+                            else -> Modifier
+                        }
+                        Box(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp).then(customModifier)) {
                             if (line.text.isNotBlank()) {
                                 val hasWordTimestamps = line.words.isNotEmpty()
                                 if (hasWordTimestamps) {
@@ -501,8 +531,10 @@ fun WordSyncedLyricLine(
                     val isPassed by androidx.compose.runtime.remember(word.endTimeMs) { androidx.compose.runtime.derivedStateOf { currentPositionProvider() > word.endTimeMs } }
 
                     val scale by animateFloatAsState(
-                        targetValue = if (isActive && (wordAnimation == 2 || wordAnimation == 4)) 1.15f else 1.0f,
-                        animationSpec = if (wordAnimation == 2 || wordAnimation == 4) androidx.compose.animation.core.spring(dampingRatio = 0.5f, stiffness = 500f) else androidx.compose.animation.core.tween(),
+                        targetValue = if (isActive && (wordAnimation == 2 || wordAnimation == 5)) 1.15f else 1.0f,
+                        animationSpec = if (wordAnimation == 5) androidx.compose.animation.core.spring(dampingRatio = 0.3f, stiffness = 800f)
+                                        else if (wordAnimation == 2) androidx.compose.animation.core.spring(dampingRatio = 0.5f, stiffness = 500f)
+                                        else androidx.compose.animation.core.tween(),
                         label = "ScaleAnim"
                     )
                     
@@ -510,20 +542,48 @@ fun WordSyncedLyricLine(
                         targetValue = if (isActive && wordAnimation == 3) 16f else 8f,
                         label = "GlowAnim"
                     )
+
+                    val translateY by animateFloatAsState(
+                        targetValue = if (isActive && wordAnimation == 4) -10f else 0f,
+                        animationSpec = androidx.compose.animation.core.spring(dampingRatio = 0.5f, stiffness = 500f),
+                        label = "TranslateYAnim"
+                    )
+
+                    val karaokeProgress by androidx.compose.runtime.remember(word.startTimeMs, word.endTimeMs, wordAnimation) {
+                        androidx.compose.runtime.derivedStateOf {
+                            if (wordAnimation == 6) {
+                                val pos = currentPositionProvider()
+                                val durationMs = word.endTimeMs - word.startTimeMs
+                                if (durationMs > 0) {
+                                    ((pos - word.startTimeMs).toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+                                } else {
+                                    if (pos > word.endTimeMs) 1f else 0f
+                                }
+                            } else {
+                                0f
+                            }
+                        }
+                    }
                     
                     val color by animateColorAsState(
                         targetValue = when {
-                            isActive -> Color(activeWordColor)
-                            isPassed -> Color(activeLineColor)
+                            isActive && wordAnimation != 6 -> Color(activeWordColor)
+                            isPassed && wordAnimation != 6 -> Color(activeLineColor)
                             else -> Color(inactiveLineColor)
                         },
                         label = "ColorAnim"
                     )
 
-                    Text(
-                        text = word.text + if (word.hasTrailingSpace) " " else "",
-                        color = color,
-                        style = TextStyle(
+                    val brush = if (wordAnimation == 6) {
+                        androidx.compose.ui.graphics.Brush.linearGradient(
+                            colors = listOf(Color(activeWordColor), Color(inactiveLineColor)),
+                            stops = floatArrayOf(karaokeProgress, karaokeProgress)
+                        )
+                    } else null
+                    
+                    val style = if (brush != null) {
+                        TextStyle(
+                            brush = brush,
                             fontSize = effectiveFontSize.sp,
                             fontWeight = if (isActive) FontWeight.ExtraBold else FontWeight.Bold,
                             fontStyle = if (agentKey == "bg") androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal,
@@ -532,10 +592,28 @@ fun WordSyncedLyricLine(
                                 offset = Offset(2f, 2f),
                                 blurRadius = shadowRadius
                             )
-                        ),
+                        )
+                    } else {
+                        TextStyle(
+                            fontSize = effectiveFontSize.sp,
+                            fontWeight = if (isActive) FontWeight.ExtraBold else FontWeight.Bold,
+                            fontStyle = if (agentKey == "bg") androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal,
+                            shadow = Shadow(
+                                color = if (isActive && wordAnimation == 3) Color(activeWordColor) else Color.Black,
+                                offset = Offset(2f, 2f),
+                                blurRadius = shadowRadius
+                            )
+                        )
+                    }
+
+                    Text(
+                        text = word.text + if (word.hasTrailingSpace) " " else "",
+                        color = if (wordAnimation == 6) Color.Unspecified else color,
+                        style = style,
                         modifier = Modifier.graphicsLayer {
                             scaleX = scale
                             scaleY = scale
+                            this.translationY = translateY
                         }
                     )
                 }

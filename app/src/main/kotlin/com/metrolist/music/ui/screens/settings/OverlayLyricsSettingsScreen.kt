@@ -460,7 +460,7 @@ fun OverlayLyricsSettingsScreen(
                 title = { Text(stringResource(R.string.overlay_lyrics_line_animation)) },
                 text = {
                     Column {
-                        val options = listOf("None", "Fade", "Slide Up", "Scale/Zoom", "Blur")
+                        val options = listOf("None", "Fade", "Slide Up", "Scale/Zoom", "3D Flip", "Blur Reveal")
                         options.forEachIndexed { index, option ->
                             Row(
                                 modifier = Modifier.fillMaxWidth().clickable {
@@ -485,7 +485,7 @@ fun OverlayLyricsSettingsScreen(
                 title = { Text(stringResource(R.string.overlay_lyrics_word_animation)) },
                 text = {
                     Column {
-                        val options = listOf("None", "Color Fill", "Spring Scale", "Glow", "Color Fill & Scale")
+                        val options = listOf("Color Fill", "None (Color Only)", "Spring Scale", "Glow", "Jump/Lift", "Elastic Pop", "Karaoke Fill")
                         options.forEachIndexed { index, option ->
                             Row(
                                 modifier = Modifier.fillMaxWidth().clickable {
