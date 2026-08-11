@@ -575,9 +575,15 @@ fun WordSyncedLyricLine(
                     )
 
                     val brush = if (wordAnimation == 6) {
+                        val activeColor = Color(activeWordColor)
+                        val inactiveColor = Color(inactiveLineColor)
                         androidx.compose.ui.graphics.Brush.linearGradient(
-                            colors = listOf(Color(activeWordColor), Color(inactiveLineColor)),
-                            stops = floatArrayOf(karaokeProgress, karaokeProgress)
+                            colorStops = arrayOf(
+                                0f to activeColor,
+                                karaokeProgress to activeColor,
+                                karaokeProgress to inactiveColor,
+                                1f to inactiveColor
+                            )
                         )
                     } else null
                     
