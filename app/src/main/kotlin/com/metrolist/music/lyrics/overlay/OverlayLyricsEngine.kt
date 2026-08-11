@@ -27,7 +27,8 @@ data class OverlayLyricWord(
     val endTimeMs: Long,
     val hasTrailingSpace: Boolean,
     val isBackground: Boolean = false,
-    val agent: String? = null
+    val agent: String? = null,
+    val romanizedText: String? = null
 )
 
 data class OverlayLyricLine(
@@ -36,7 +37,9 @@ data class OverlayLyricLine(
     val endTimeMs: Long,
     val words: List<OverlayLyricWord>,
     val agent: String?,
-    val isBackground: Boolean
+    val isBackground: Boolean,
+    val romanizedText: String? = null,
+    val translatedText: String? = null
 )
 
 fun List<LyricsEntry>.toOverlayLyricLines(): List<OverlayLyricLine> {

@@ -240,6 +240,10 @@ class OverlayLyricsService : Service() {
                     .collectAsState(initial = android.graphics.Color.WHITE)
                 val inactiveLineColor by OverlayLyricsPreferences.getInactiveLineColor(this@OverlayLyricsService)
                     .collectAsState(initial = android.graphics.Color.parseColor("#A6FFFFFF"))
+                val showRomanized by OverlayLyricsPreferences.getShowRomanizedLyrics(this@OverlayLyricsService)
+                    .collectAsState(initial = true)
+                val showTranslated by OverlayLyricsPreferences.getShowTranslatedLyrics(this@OverlayLyricsService)
+                    .collectAsState(initial = true)
 
                 if (enabled) {
                     AnimatedVisibility(
@@ -259,7 +263,9 @@ class OverlayLyricsService : Service() {
                                     wordAnimation = wordAnimation,
                                     activeWordColor = activeWordColor,
                                     activeLineColor = activeLineColor,
-                                    inactiveLineColor = inactiveLineColor
+                                    inactiveLineColor = inactiveLineColor,
+                                    showRomanized = showRomanized,
+                                    showTranslated = showTranslated
                                 )
                             }
                         }
@@ -363,7 +369,9 @@ fun OverlayLyricsView(
     wordAnimation: Int,
     activeWordColor: Int,
     activeLineColor: Int,
-    inactiveLineColor: Int
+    inactiveLineColor: Int,
+    showRomanized: Boolean,
+    showTranslated: Boolean
 ) {
     val backgroundColor by OverlayLyricsPreferences.getBackgroundColor(LocalContext.current)
         .collectAsState(initial = android.graphics.Color.TRANSPARENT)
@@ -441,44 +449,88 @@ fun OverlayLyricsView(
                         }
                         Box(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp).then(customModifier)) {
                             if (line.text.isNotBlank()) {
-                                val hasWordTimestamps = line.words.isNotEmpty()
-                                if (hasWordTimestamps) {
-                                    WordSyncedLyricLine(
-                                        line = line,
-                                        currentPositionProvider = currentPositionProvider,
-                                        fontSizeSp = fontSizeSp,
-                                        wordAnimation = wordAnimation,
-                                        activeWordColor = activeWordColor,
-                                        activeLineColor = activeLineColor,
-                                        inactiveLineColor = inactiveLineColor
-                                    )
-                                } else {
-                                    val isBg = line.isBackground
-                                    val textAlign = when {
-                                        isBg -> TextAlign.Right
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                    val hasWordTimestamps = line.words.isNotEmpty()
+                                    if (hasWordTimestamps) {
+                                        WordSyncedLyricLine(
+                                            line = line,
+                                            currentPositionProvider = currentPositionProvider,
+                                            fontSizeSp = fontSizeSp,
+                                            wordAnimation = wordAnimation,
+                                            activeWordColor = activeWordColor,
+                                            activeLineColor = activeLineColor,
+                                            inactiveLineColor = inactiveLineColor
+                                        )
+                                    } else {
+                                        val isBg = line.isBackground
+                                        val textAlign = when {
+                                            isBg -> TextAlign.Right
+                                            line.agent == "v2" -> TextAlign.Right
+                                            else -> TextAlign.Start
+                                        }
+                                        val effectiveFontSize = if (isBg) fontSizeSp * 0.85f else fontSizeSp
+                                        val baseColor = Color(activeLineColor)
+                                        val finalColor = if (isBg) baseColor.copy(alpha = 0.65f) else baseColor
+    
+                                        Text(
+                                            text = line.text,
+                                            style = TextStyle(
+                                                fontSize = effectiveFontSize.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                fontStyle = if (isBg) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal,
+                                                color = finalColor,
+                                                textAlign = textAlign,
+                                                shadow = Shadow(
+                                                    color = Color.Black,
+                                                    offset = Offset(2f, 2f),
+                                                    blurRadius = 8f
+                                                )
+                                            ),
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+                                    }
+                                    
+                                    val alignment = when {
+                                        line.isBackground -> TextAlign.Right
                                         line.agent == "v2" -> TextAlign.Right
                                         else -> TextAlign.Start
                                     }
-                                    val effectiveFontSize = if (isBg) fontSizeSp * 0.85f else fontSizeSp
-                                    val baseColor = Color(activeLineColor)
-                                    val finalColor = if (isBg) baseColor.copy(alpha = 0.65f) else baseColor
-
-                                    Text(
-                                        text = line.text,
-                                        style = TextStyle(
-                                            fontSize = effectiveFontSize.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            fontStyle = if (isBg) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal,
-                                            color = finalColor,
-                                            textAlign = textAlign,
-                                            shadow = Shadow(
-                                                color = Color.Black,
-                                                offset = Offset(2f, 2f),
-                                                blurRadius = 8f
-                                            )
-                                        ),
-                                        modifier = Modifier.fillMaxWidth()
-                                    )
+                                    
+                                    if (showRomanized && !line.romanizedText.isNullOrBlank()) {
+                                        Text(
+                                            text = line.romanizedText,
+                                            style = TextStyle(
+                                                fontSize = (fontSizeSp * 0.8f).sp,
+                                                fontWeight = FontWeight.Normal,
+                                                color = Color(activeLineColor).copy(alpha = 0.8f),
+                                                textAlign = alignment,
+                                                shadow = Shadow(
+                                                    color = Color.Black,
+                                                    offset = Offset(2f, 2f),
+                                                    blurRadius = 8f
+                                                )
+                                            ),
+                                            modifier = Modifier.fillMaxWidth().padding(top = 2.dp)
+                                        )
+                                    }
+                                    
+                                    if (showTranslated && !line.translatedText.isNullOrBlank()) {
+                                        Text(
+                                            text = line.translatedText,
+                                            style = TextStyle(
+                                                fontSize = (fontSizeSp * 0.75f).sp,
+                                                fontWeight = FontWeight.Normal,
+                                                color = Color(activeLineColor).copy(alpha = 0.7f),
+                                                textAlign = alignment,
+                                                shadow = Shadow(
+                                                    color = Color.Black,
+                                                    offset = Offset(2f, 2f),
+                                                    blurRadius = 8f
+                                                )
+                                            ),
+                                            modifier = Modifier.fillMaxWidth().padding(top = 2.dp)
+                                        )
+                                    }
                                 }
                             }
                         }

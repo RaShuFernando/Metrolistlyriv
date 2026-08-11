@@ -75,6 +75,8 @@ fun OverlayLyricsSettingsScreen(
 
     val enabled by OverlayLyricsPreferences.getOverlayEnabled(context).collectAsState(initial = false)
     val fontSize by OverlayLyricsPreferences.getOverlayFontSize(context).collectAsState(initial = 18f)
+    val showRomanized by OverlayLyricsPreferences.getShowRomanizedLyrics(context).collectAsState(initial = true)
+    val showTranslated by OverlayLyricsPreferences.getShowTranslatedLyrics(context).collectAsState(initial = true)
 
     val currentVideoId by OverlayLyricsService.currentVideoId.collectAsState()
 
@@ -275,6 +277,36 @@ fun OverlayLyricsSettingsScreen(
                                     steps = 24
                                 )
                             }
+                        }
+                    ),
+                    Material3SettingsItem(
+                        icon = painterResource(R.drawable.translate), // Assuming translate icon exists or reuse something similar, maybe explicitly R.drawable.translate
+                        title = { Text(stringResource(R.string.overlay_lyrics_show_romanized)) },
+                        description = { Text(stringResource(R.string.overlay_lyrics_show_romanized_desc)) },
+                        trailingContent = {
+                            Switch(
+                                checked = showRomanized,
+                                onCheckedChange = { newValue ->
+                                    coroutineScope.launch {
+                                        OverlayLyricsPreferences.setShowRomanizedLyrics(context, newValue)
+                                    }
+                                }
+                            )
+                        }
+                    ),
+                    Material3SettingsItem(
+                        icon = painterResource(R.drawable.translate),
+                        title = { Text(stringResource(R.string.overlay_lyrics_show_translated)) },
+                        description = { Text(stringResource(R.string.overlay_lyrics_show_translated_desc)) },
+                        trailingContent = {
+                            Switch(
+                                checked = showTranslated,
+                                onCheckedChange = { newValue ->
+                                    coroutineScope.launch {
+                                        OverlayLyricsPreferences.setShowTranslatedLyrics(context, newValue)
+                                    }
+                                }
+                            )
                         }
                     ),
                     Material3SettingsItem(

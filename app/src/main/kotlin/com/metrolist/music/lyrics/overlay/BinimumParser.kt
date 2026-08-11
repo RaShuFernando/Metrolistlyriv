@@ -45,6 +45,8 @@ class BinimumParser : LyricParser {
     override fun parse(rawText: String): List<OverlayLyricLine> {
         val lines = mutableListOf<OverlayLyricLine>()
         val agentMap = mutableMapOf<String, String>()
+        val transliterationMap = mutableMapOf<String, MutableList<OverlayLyricWord>>()
+        val translationMap = mutableMapOf<String, String>()
 
         try {
             val parser = Xml.newPullParser()
@@ -61,7 +63,9 @@ class BinimumParser : LyricParser {
                 val isWord: Boolean,
                 val agent: String? = null,
                 val id: String? = null,
-                val type: String? = null
+                val type: String? = null,
+                val forAttr: String? = null,
+                val itunesKey: String? = null
             ) {
                 val text = java.lang.StringBuilder()
                 val words = mutableListOf<OverlayLyricWord>()
@@ -88,6 +92,8 @@ class BinimumParser : LyricParser {
 
                         val id = parser.getAttributeValue(null, "xml:id") ?: parser.getAttributeValue(null, "id")
                         val type = parser.getAttributeValue(null, "type")
+                        val forAttr = parser.getAttributeValue(null, "for")
+                        val itunesKey = parser.getAttributeValue(null, "itunes:key")
 
                         val isBg = (parent?.isBackground == true) || (role == "x-bg")
                         val isWord = (cleanName == "span") && (beginStr != null || endStr != null)
@@ -100,7 +106,9 @@ class BinimumParser : LyricParser {
                             isWord = isWord,
                             agent = agentRef ?: parent?.agent,
                             id = id,
-                            type = type
+                            type = type,
+                            forAttr = forAttr,
+                            itunesKey = itunesKey
                         )
                         stack.add(state)
 
@@ -139,12 +147,40 @@ class BinimumParser : LyricParser {
                                     }
                                 }
                                 
+                                if (state.name == "text") {
+                                    val parent = stack.lastOrNull()
+                                    val forAttr = state.forAttr
+                                    if (parent != null && forAttr != null) {
+                                        if (parent.name == "translation") {
+                                            translationMap[forAttr] = trimmedText
+                                        } else if (parent.name == "transliteration") {
+                                            val fixedWords = state.words.mapIndexed { index, word ->
+                                                word.copy(hasTrailingSpace = index < state.words.size - 1)
+                                            }
+                                            transliterationMap[forAttr] = fixedWords.toMutableList()
+                                        }
+                                    }
+                                }
+
                                 if (state.name == "p") {
                                     if (trimmedText.isNotEmpty() || state.words.isNotEmpty()) {
+                                        val pKey = state.itunesKey ?: state.id
+                                        
                                         // For Binimum, fix word spacing by defaulting hasTrailingSpace = true for all words except the last one in a <p>
                                         val fixedWords = state.words.mapIndexed { index, word ->
-                                            word.copy(hasTrailingSpace = index < state.words.size - 1)
+                                            val wordTransliterated = if (pKey != null) {
+                                                val romanizedWords = transliterationMap[pKey]
+                                                val match = romanizedWords?.find { Math.abs(it.startTimeMs - word.startTimeMs) < 100 }
+                                                match?.text
+                                            } else null
+                                            word.copy(hasTrailingSpace = index < state.words.size - 1, romanizedText = wordTransliterated)
                                         }
+                                        
+                                        val translatedText = if (pKey != null) translationMap[pKey] else null
+                                        val romanizedText = if (pKey != null) {
+                                            val romanizedWords = transliterationMap[pKey]
+                                            romanizedWords?.joinToString(separator = "") { it.text + (if (it.hasTrailingSpace) " " else "") }?.trim()
+                                        } else null
 
                                         lines.add(
                                             OverlayLyricLine(
@@ -153,7 +189,9 @@ class BinimumParser : LyricParser {
                                                 endTimeMs = state.endTimeMs,
                                                 words = fixedWords,
                                                 agent = state.agent,
-                                                isBackground = state.isBackground
+                                                isBackground = state.isBackground,
+                                                translatedText = translatedText,
+                                                romanizedText = romanizedText
                                             )
                                         )
                                     }
@@ -168,8 +206,8 @@ class BinimumParser : LyricParser {
                                             agent = state.agent
                                         )
                                         
-                                        val pState = stack.findLast { it.name == "p" }
-                                        pState?.words?.add(word)
+                                        val parentWithWords = stack.findLast { it.name == "p" || it.name == "text" }
+                                        parentWithWords?.words?.add(word)
                                     }
                                 }
                             } else {

@@ -1044,6 +1044,10 @@
     <string name="no_versions_found">No lyric versions found for current song</string>
     <string name="prefetch_upcoming_lyrics">Pre-fetch Upcoming Lyrics</string>
     <string name="prefetch_upcoming_lyrics_desc">Automatically download and save lyrics for the next 10 songs in the queue.</string>
+    <string name="overlay_lyrics_show_romanized">Show Romanized Lyrics</string>
+    <string name="overlay_lyrics_show_romanized_desc">Display transliterations below original lyrics if available</string>
+    <string name="overlay_lyrics_show_translated">Show Translated Lyrics</string>
+    <string name="overlay_lyrics_show_translated_desc">Display English translations below original lyrics if available</string>
     
     <string name="overlay_lyrics_line_animation">Line Sync Animation</string>
     <string name="overlay_lyrics_line_animation_desc">Animation when the active line changes</string>

@@ -144,4 +144,31 @@ object OverlayLyricsPreferences {
             prefs[KEY_BACKGROUND_COLOR] = color
         }
     }
+
+    private val KEY_SHOW_ROMANIZED = booleanPreferencesKey("show_romanized_lyrics")
+    private val KEY_SHOW_TRANSLATED = booleanPreferencesKey("show_translated_lyrics")
+
+    fun getShowRomanizedLyrics(context: Context): Flow<Boolean> {
+        return context.dataStore.data.map { prefs ->
+            prefs[KEY_SHOW_ROMANIZED] ?: true
+        }
+    }
+
+    suspend fun setShowRomanizedLyrics(context: Context, enabled: Boolean) {
+        context.safeDataStoreEdit { prefs ->
+            prefs[KEY_SHOW_ROMANIZED] = enabled
+        }
+    }
+
+    fun getShowTranslatedLyrics(context: Context): Flow<Boolean> {
+        return context.dataStore.data.map { prefs ->
+            prefs[KEY_SHOW_TRANSLATED] ?: true
+        }
+    }
+
+    suspend fun setShowTranslatedLyrics(context: Context, enabled: Boolean) {
+        context.safeDataStoreEdit { prefs ->
+            prefs[KEY_SHOW_TRANSLATED] = enabled
+        }
+    }
 }
