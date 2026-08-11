@@ -74,13 +74,22 @@ object LyricsPrefetchManager {
                     isExplicit = customMetadata.explicit
                 )
 
-                try {
-                    LyricsSyncManager.syncLyrics(context.applicationContext, vaultMetadata)
-                } catch (e: RateLimitException) {
-                    Timber.tag(TAG).w("Rate limit (HTTP 429) hit during prefetch. Aborting entire prefetch batch.")
-                    break // Abort the loop
-                } catch (e: Exception) {
-                    Timber.tag(TAG).e(e, "Error pre-fetching lyrics for $videoId")
+                var rateLimited = false
+                for (attempt in 1..3) {
+                    try {
+                        LyricsSyncManager.syncLyrics(context.applicationContext, vaultMetadata)
+                        break
+                    } catch (e: RateLimitException) {
+                        Timber.tag(TAG).w("Rate limit (HTTP 429) hit during prefetch. Aborting entire prefetch batch.")
+                        rateLimited = true
+                        break
+                    } catch (e: Exception) {
+                        Timber.tag(TAG).e(e, "Error pre-fetching lyrics for $videoId (Attempt $attempt)")
+                        if (attempt < 3) delay(2000L)
+                    }
+                }
+                if (rateLimited) {
+                    break // Abort the entire prefetch batch
                 }
 
                 // Mandatory delay to avoid HTTP 429

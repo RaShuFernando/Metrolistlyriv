@@ -341,6 +341,7 @@ class OverlayLyricsService : Service() {
 
         if (composeView != null && windowManager != null) {
             try {
+                composeView?.disposeComposition()
                 windowManager?.removeView(composeView)
             } catch (_: Exception) {}
         }

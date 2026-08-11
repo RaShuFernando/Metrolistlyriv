@@ -186,19 +186,22 @@ object OverlayLyricsEngine {
                     File(index.folderPath, "metadata.json").absolutePath
                 }
 
-                try {
-                    if (metadataPath.startsWith("content://")) {
-                        context.applicationContext.contentResolver.openInputStream(Uri.parse(metadataPath))?.use {
-                            metadataContent = it.bufferedReader().readText()
+                metadataContent = withContext(Dispatchers.IO) {
+                    try {
+                        if (metadataPath.startsWith("content://")) {
+                            context.applicationContext.contentResolver.openInputStream(Uri.parse(metadataPath))?.use {
+                                it.bufferedReader().readText()
+                            }
+                        } else {
+                            val metadataFile = File(metadataPath)
+                            if (metadataFile.exists()) {
+                                metadataFile.readText()
+                            } else null
                         }
-                    } else {
-                        val metadataFile = File(metadataPath)
-                        if (metadataFile.exists()) {
-                            metadataContent = metadataFile.readText()
-                        }
+                    } catch (e: Exception) {
+                        Log.e("LyricsEngine", "Failed to read metadata: ${e.message}")
+                        null
                     }
-                } catch (e: Exception) {
-                    Log.e("LyricsEngine", "Failed to read metadata: ${e.message}")
                 }
 
                 var resolvedActiveFile: String? = null

@@ -32,7 +32,7 @@ data class VaultMetadata(
 class VaultManager(private val masterFolderPath: String) {
 
     companion object {
-        val metadataMutex = Mutex()
+        val metadataMutexMap = java.util.concurrent.ConcurrentHashMap<String, Mutex>()
         val jsonSerializer = Json {
             ignoreUnknownKeys = true
             prettyPrint = true
@@ -147,7 +147,8 @@ class VaultManager(private val masterFolderPath: String) {
         lastChecked: Long = System.currentTimeMillis(),
         lastUpdated: Long = System.currentTimeMillis()
     ): String? = withContext(Dispatchers.IO) {
-        metadataMutex.withLock {
+        val key = metadata.videoId.takeIf { it.isNotBlank() } ?: "${metadata.artist}_${metadata.title}"
+        metadataMutexMap.getOrPut(key) { Mutex() }.withLock {
             val lyricFileInfos = parsedLyricsList.map { lyric ->
                 val fileName = "${sanitize(metadata.title)}_${sanitize(lyric.provider)}_${sanitize(lyric.type)}.${lyric.format.lowercase()}"
                 val rank = LyricsRanking.getRank(lyric.provider, lyric.type)
@@ -182,12 +183,17 @@ class VaultManager(private val masterFolderPath: String) {
     }
 
     suspend fun readMetadataJson(parsedVaultDir: File): LyricMetadata? = withContext(Dispatchers.IO) {
-        metadataMutex.withLock {
-            val metadataFile = File(parsedVaultDir, "metadata.json")
-            if (!metadataFile.exists()) return@withLock null
+        val metadataFile = File(parsedVaultDir, "metadata.json")
+        if (!metadataFile.exists()) return@withContext null
+
+        val content = try { metadataFile.readText() } catch (e: Exception) { return@withContext null }
+        val metadata = try { jsonSerializer.decodeFromString(LyricMetadata.serializer(), content) } catch (e: Exception) { return@withContext null }
+
+        val key = metadata.videoId.takeIf { it.isNotBlank() } ?: "${metadata.artist}_${metadata.title}"
+        metadataMutexMap.getOrPut(key) { Mutex() }.withLock {
+            val freshContent = try { metadataFile.readText() } catch (e: Exception) { return@withLock null }
             try {
-                val content = metadataFile.readText()
-                jsonSerializer.decodeFromString(LyricMetadata.serializer(), content)
+                jsonSerializer.decodeFromString(LyricMetadata.serializer(), freshContent)
             } catch (e: Exception) {
                 FileLogger.e("VaultManager", "Error reading metadata.json", e)
                 null
@@ -199,13 +205,18 @@ class VaultManager(private val masterFolderPath: String) {
         parsedVaultDir: File,
         selectedFilename: String
     ): LyricMetadata? = withContext(Dispatchers.IO) {
-        metadataMutex.withLock {
-            val metadataFile = File(parsedVaultDir, "metadata.json")
-            if (!metadataFile.exists()) return@withLock null
+        val metadataFile = File(parsedVaultDir, "metadata.json")
+        if (!metadataFile.exists()) return@withContext null
+
+        val content = try { metadataFile.readText() } catch (e: Exception) { return@withContext null }
+        val existing = try { jsonSerializer.decodeFromString(LyricMetadata.serializer(), content) } catch (e: Exception) { return@withContext null }
+
+        val key = existing.videoId.takeIf { it.isNotBlank() } ?: "${existing.artist}_${existing.title}"
+        metadataMutexMap.getOrPut(key) { Mutex() }.withLock {
             try {
-                val content = metadataFile.readText()
-                val existing = jsonSerializer.decodeFromString(LyricMetadata.serializer(), content)
-                val updatedMetadata = existing.copy(
+                val freshContent = metadataFile.readText()
+                val freshExisting = jsonSerializer.decodeFromString(LyricMetadata.serializer(), freshContent)
+                val updatedMetadata = freshExisting.copy(
                     active_lyric_file = selectedFilename,
                     last_updated = System.currentTimeMillis()
                 )
