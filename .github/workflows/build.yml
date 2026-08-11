@@ -1,4 +1,4 @@
-name: Build APKs R
+name: Build APKsR
 
 on:
   workflow_dispatch:
@@ -16,11 +16,16 @@ permissions:
   contents: write
   discussions: write
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build_release:
     name: Build Release (FOSS)
     if: github.actor != 'dependabot[bot]' && github.actor != 'renovate[bot]'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v6
@@ -35,6 +40,8 @@ jobs:
 
       - name: Set Up Gradle
         uses: gradle/actions/setup-gradle@v5
+        with:
+          cache-cleanup: on-success
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
@@ -64,10 +71,9 @@ jobs:
           OUTPUT_DIR="app/build/outputs/apk/foss/release"
           mkdir -p "$OUTPUT_DIR/out"
           TARGET_NAME="app-foss-release-signed.apk"
-          # The signing action appends "-signed" to the APK, we move that specific file
           find "$OUTPUT_DIR" -maxdepth 1 -name "*-signed.apk" | xargs -I{} mv {} "$OUTPUT_DIR/out/$TARGET_NAME"
 
-      - name: Upload APK
+      - name: Upload Signed APK
         uses: actions/upload-artifact@v6
         with:
           name: app-release-foss
@@ -77,6 +83,7 @@ jobs:
     name: Build Debug (FOSS)
     if: github.actor != 'dependabot[bot]' && github.actor != 'renovate[bot]'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v6
@@ -91,6 +98,8 @@ jobs:
 
       - name: Set Up Gradle
         uses: gradle/actions/setup-gradle@v5
+        with:
+          cache-cleanup: on-success
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
@@ -115,3 +124,4 @@ jobs:
         with:
           name: app-debug-foss
           path: app/build/outputs/apk/foss/debug/*.apk
+          
