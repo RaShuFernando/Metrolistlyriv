@@ -2,7 +2,7 @@ package com.metrolist.music.lyrics.vault
 
 import java.io.File
 import java.security.MessageDigest
-import org.json.JSONObject
+import kotlinx.serialization.Serializable
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -27,6 +27,14 @@ data class VaultMetadata(
     val artistBrowseId: String? = null,
     val albumBrowseId: String? = null,
     val isExplicit: Boolean = false
+)
+
+@Serializable
+data class Changelog(
+    val latest_version: Int = 0,
+    val active_version_hash: String = "",
+    val last_updated: Long = 0L,
+    val last_checked: Long = 0L
 )
 
 class VaultManager(private val masterFolderPath: String) {
@@ -86,9 +94,11 @@ class VaultManager(private val masterFolderPath: String) {
         val metadataFile = File(parsedVaultDir, "metadata.json")
         if (metadataFile.exists()) {
             try {
-                val json = JSONObject(metadataFile.readText())
-                json.put("last_checked", timestamp)
-                metadataFile.writeText(json.toString(2))
+                val content = metadataFile.readText()
+                val metadata = jsonSerializer.decodeFromString(LyricMetadata.serializer(), content)
+                val updatedMetadata = metadata.copy(last_checked = timestamp)
+                val jsonString = jsonSerializer.encodeToString(LyricMetadata.serializer(), updatedMetadata)
+                metadataFile.writeText(jsonString)
             } catch (e: Exception) {
                 FileLogger.e("VaultManager", "Failed to update last_checked in metadata.json", e)
             }
@@ -102,11 +112,15 @@ class VaultManager(private val masterFolderPath: String) {
         val now = System.currentTimeMillis()
 
         if (changelogFile.exists()) {
-            val changelog = JSONObject(changelogFile.readText())
-            if (changelog.optString("active_version_hash") == fileHash) {
+            val changelog = try {
+                jsonSerializer.decodeFromString(Changelog.serializer(), changelogFile.readText())
+            } catch (e: Exception) {
+                Changelog()
+            }
+            if (changelog.active_version_hash == fileHash) {
                 // Duplicate file, update changelog timestamp
-                changelog.put("last_checked", now)
-                changelogFile.writeText(changelog.toString())
+                val updatedChangelog = changelog.copy(last_checked = now)
+                changelogFile.writeText(jsonSerializer.encodeToString(Changelog.serializer(), updatedChangelog))
 
                 // Update existing metadata.json last_checked timestamp ONLY
                 val parsedVaultDir = getSongParsedVaultDir(artist, album, song)
@@ -120,8 +134,12 @@ class VaultManager(private val masterFolderPath: String) {
         // It's a new version
         var newVersionNum = 1
         if (changelogFile.exists()) {
-            val changelog = JSONObject(changelogFile.readText())
-            newVersionNum = changelog.optInt("latest_version", 0) + 1
+            val changelog = try {
+                jsonSerializer.decodeFromString(Changelog.serializer(), changelogFile.readText())
+            } catch (e: Exception) {
+                Changelog()
+            }
+            newVersionNum = changelog.latest_version + 1
         }
         
         val newFileName = "${sanitize(song)}_raw_v${newVersionNum}.sse"
@@ -129,13 +147,13 @@ class VaultManager(private val masterFolderPath: String) {
         tempFile.copyTo(destinationFile, overwrite = true)
         tempFile.delete()
 
-        val json = JSONObject().apply {
-            put("latest_version", newVersionNum)
-            put("active_version_hash", fileHash)
-            put("last_updated", now)
-            put("last_checked", now)
-        }
-        changelogFile.writeText(json.toString())
+        val newChangelog = Changelog(
+            latest_version = newVersionNum,
+            active_version_hash = fileHash,
+            last_updated = now,
+            last_checked = now
+        )
+        changelogFile.writeText(jsonSerializer.encodeToString(Changelog.serializer(), newChangelog))
         
         return destinationFile
     }
@@ -273,40 +291,33 @@ class VaultManager(private val masterFolderPath: String) {
         lastChecked: Long = System.currentTimeMillis(),
         lastUpdated: Long = System.currentTimeMillis()
     ) {
-        val lyricsArray = org.json.JSONArray()
-        parsedLyricsList.forEach { lyric ->
+        val lyricFileInfos = parsedLyricsList.map { lyric ->
             val fileName = "${sanitize(metadata.title)}_${sanitize(lyric.provider)}_${sanitize(lyric.type)}.${lyric.format.lowercase()}"
-            val lyricObj = JSONObject().apply {
-                put("provider", lyric.provider)
-                put("type", lyric.type)
-                put("format", lyric.format)
-                put("file_name", fileName)
-            }
-            lyricsArray.put(lyricObj)
+            LyricFileInfo(
+                provider = lyric.provider,
+                type = lyric.type,
+                format = lyric.format,
+                filename = fileName,
+                rank = LyricsRanking.getRank(lyric.provider, lyric.type)
+            )
         }
 
-        val json = JSONObject().apply {
-            put("videoId", metadata.videoId)
-            put("title", metadata.title)
-            put("artist", metadata.artist)
-            put("album", metadata.album)
-            put("durationSeconds", metadata.durationSeconds)
-            put("albumArtUrl", metadata.albumArtUrl)
-            put("composer", metadata.composer)
-            put("description", metadata.description ?: "")
-            put("yt_description", metadata.description ?: "")
-            put("mediaId", metadata.mediaId)
-            put("releaseYear", metadata.releaseYear ?: JSONObject.NULL)
-            put("trackNumber", metadata.trackNumber ?: JSONObject.NULL)
-            put("artistBrowseId", metadata.artistBrowseId ?: JSONObject.NULL)
-            put("albumBrowseId", metadata.albumBrowseId ?: JSONObject.NULL)
-            put("isExplicit", metadata.isExplicit)
-            put("last_checked", lastChecked)
-            put("last_updated", lastUpdated)
-            put("lyrics", lyricsArray)
-        }
+        val lyricMetadata = LyricMetadata(
+            videoId = metadata.videoId,
+            title = metadata.title,
+            artist = metadata.artist,
+            album = metadata.album,
+            durationSeconds = metadata.durationSeconds,
+            albumArtUrl = metadata.albumArtUrl,
+            yt_description = metadata.description,
+            lyrics = lyricFileInfos,
+            last_checked = lastChecked,
+            last_updated = lastUpdated
+        )
+
         val metadataFile = File(parsedVaultDir, "metadata.json")
-        metadataFile.writeText(json.toString(2))
+        val jsonString = jsonSerializer.encodeToString(LyricMetadata.serializer(), lyricMetadata)
+        metadataFile.writeText(jsonString)
     }
 
     fun writeErrorLog(module: String, error: String) {

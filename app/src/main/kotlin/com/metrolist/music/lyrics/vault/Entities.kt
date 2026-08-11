@@ -44,7 +44,11 @@ data class AlbumEntity(
             onDelete = ForeignKey.CASCADE
         )
     ],
-    indices = [Index(value = ["albumId"])]
+    indices = [
+        Index(value = ["albumId"]),
+        Index(value = ["title"]),
+        Index(value = ["youtubeVideoId"])
+    ]
 )
 data class SongEntity(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
