@@ -4,7 +4,6 @@ import android.content.pm.PackageManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
-import rikka.shizuku.Shizuku
 import java.io.BufferedReader
 import java.io.InputStreamReader
 
@@ -14,12 +13,12 @@ object ShizukuLogcatReader {
     private const val SHIZUKU_REQ_CODE = 1001
 
     suspend fun extractVideoId(): String? = withContext(Dispatchers.IO) {
-        if (!Shizuku.pingBinder()) {
+        if (!ShizukuWrapper.pingBinder()) {
             return@withContext null
         }
         
-        if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
-            Shizuku.requestPermission(SHIZUKU_REQ_CODE)
+        if (ShizukuWrapper.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
+            ShizukuWrapper.requestPermission(SHIZUKU_REQ_CODE)
             return@withContext null
         }
 
@@ -39,10 +38,14 @@ object ShizukuLogcatReader {
         null
     }
 
+    private fun createProcess(command: Array<String>): Process {
+        return ShizukuWrapper.executeCommand(command)
+    }
+
     private suspend fun readLogcat(): String? = withContext(Dispatchers.IO) {
         return@withContext try {
             val command = arrayOf("logcat", "-d", "-s", "YTMusicVideoProbe")
-            val process: java.lang.Process = Shizuku.newProcess(command, null, null)
+            val process = createProcess(command)
             
             val reader = BufferedReader(InputStreamReader(process.inputStream))
             var line: String?
@@ -66,7 +69,7 @@ object ShizukuLogcatReader {
     private suspend fun clearLogcat() = withContext(Dispatchers.IO) {
         try {
             val command = arrayOf("logcat", "-c")
-            val process: java.lang.Process = Shizuku.newProcess(command, null, null)
+            val process = createProcess(command)
             process.waitFor()
             process.destroy()
         } catch (e: Exception) {
