@@ -411,7 +411,7 @@ dependencies {
     implementation(libs.protobuf.javalite)
     implementation(libs.protobuf.kotlin.lite)
     implementation(libs.shizuku.api)
-    implementation(libs.shizuku.provider)
+    compileOnly(libs.shizuku.provider)
 
     coreLibraryDesugaring(libs.desugaring)
 
