@@ -32,7 +32,7 @@ object ShizukuLogcatReader {
 
     private fun readLogcat(): String? {
         return try {
-            val process = Shizuku.newProcess(arrayOf("logcat", "-d", "-s", "YTMusicVideoProbe"), null, null)
+            val process: java.lang.Process = Shizuku.newProcess(arrayOf("logcat", "-d", "-s", "YTMusicVideoProbe"), null, null)
             val reader = BufferedReader(InputStreamReader(process.inputStream))
             var line: String?
             var foundVideoId: String? = null
@@ -53,7 +53,7 @@ object ShizukuLogcatReader {
 
     private fun clearLogcat() {
         try {
-            val process = Shizuku.newProcess(arrayOf("logcat", "-c"), null, null)
+            val process: java.lang.Process = Shizuku.newProcess(arrayOf("logcat", "-c"), null, null)
             process.waitFor()
         } catch (e: Exception) {
             e.printStackTrace()
