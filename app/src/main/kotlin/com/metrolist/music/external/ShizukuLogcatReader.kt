@@ -30,9 +30,21 @@ object ShizukuLogcatReader {
         return null
     }
 
+    private fun createProcess(command: Array<String>): java.lang.Process {
+        val newProcessMethod = Shizuku::class.java.getMethod(
+            "newProcess",
+            Array<String>::class.java,
+            Array<String>::class.java,
+            String::class.java
+        )
+        return newProcessMethod.invoke(null, command, null, null) as java.lang.Process
+    }
+
     private fun readLogcat(): String? {
         return try {
-            val process: java.lang.Process = Shizuku.newProcess(arrayOf("logcat", "-d", "-s", "YTMusicVideoProbe"), null, null)
+            val command = arrayOf("logcat", "-d", "-s", "YTMusicVideoProbe")
+            val process = createProcess(command)
+            
             val reader = BufferedReader(InputStreamReader(process.inputStream))
             var line: String?
             var foundVideoId: String? = null
@@ -44,6 +56,7 @@ object ShizukuLogcatReader {
                 }
             }
             process.waitFor()
+            process.destroy()
             foundVideoId
         } catch (e: Exception) {
             e.printStackTrace()
@@ -53,8 +66,10 @@ object ShizukuLogcatReader {
 
     private fun clearLogcat() {
         try {
-            val process: java.lang.Process = Shizuku.newProcess(arrayOf("logcat", "-c"), null, null)
+            val command = arrayOf("logcat", "-c")
+            val process = createProcess(command)
             process.waitFor()
+            process.destroy()
         } catch (e: Exception) {
             e.printStackTrace()
         }
