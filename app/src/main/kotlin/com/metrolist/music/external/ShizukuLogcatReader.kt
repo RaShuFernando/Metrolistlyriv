@@ -1,6 +1,9 @@
 package com.metrolist.music.external
 
+import android.content.pm.PackageManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import rikka.shizuku.Shizuku
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -8,10 +11,16 @@ import java.io.InputStreamReader
 object ShizukuLogcatReader {
 
     private var lastExtractedVideoId: String? = null
+    private const val SHIZUKU_REQ_CODE = 1001
 
-    suspend fun extractVideoId(): String? {
+    suspend fun extractVideoId(): String? = withContext(Dispatchers.IO) {
         if (!Shizuku.pingBinder()) {
-            return null
+            return@withContext null
+        }
+        
+        if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
+            Shizuku.requestPermission(SHIZUKU_REQ_CODE)
+            return@withContext null
         }
 
         val maxAttempts = 6 // 500ms * 6 = 3 seconds
@@ -22,35 +31,25 @@ object ShizukuLogcatReader {
             if (videoId != null && videoId != lastExtractedVideoId) {
                 lastExtractedVideoId = videoId
                 clearLogcat()
-                return videoId
+                return@withContext videoId
             }
             delay(500)
             attempt++
         }
-        return null
+        null
     }
 
-    private fun createProcess(command: Array<String>): java.lang.Process {
-        val newProcessMethod = Shizuku::class.java.getMethod(
-            "newProcess",
-            Array<String>::class.java,
-            Array<String>::class.java,
-            String::class.java
-        )
-        return newProcessMethod.invoke(null, command, null, null) as java.lang.Process
-    }
-
-    private fun readLogcat(): String? {
-        return try {
+    private suspend fun readLogcat(): String? = withContext(Dispatchers.IO) {
+        return@withContext try {
             val command = arrayOf("logcat", "-d", "-s", "YTMusicVideoProbe")
-            val process = createProcess(command)
+            val process: java.lang.Process = Shizuku.newProcess(command, null, null)
             
             val reader = BufferedReader(InputStreamReader(process.inputStream))
             var line: String?
             var foundVideoId: String? = null
 
             while (reader.readLine().also { line = it } != null) {
-                val match = Regex("videoId=\\[(.*?)\\]").find(line ?: "")
+                val match = Regex("videoId=\\[?([a-zA-Z0-9_-]{11})\\]?").find(line ?: "")
                 if (match != null) {
                     foundVideoId = match.groupValues[1]
                 }
@@ -64,10 +63,10 @@ object ShizukuLogcatReader {
         }
     }
 
-    private fun clearLogcat() {
+    private suspend fun clearLogcat() = withContext(Dispatchers.IO) {
         try {
             val command = arrayOf("logcat", "-c")
-            val process = createProcess(command)
+            val process: java.lang.Process = Shizuku.newProcess(command, null, null)
             process.waitFor()
             process.destroy()
         } catch (e: Exception) {
