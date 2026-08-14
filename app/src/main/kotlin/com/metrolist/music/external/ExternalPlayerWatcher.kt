@@ -21,9 +21,11 @@ class ExternalPlayerWatcher(
     
     init {
         try {
-            mediaSessionManager.addOnActiveSessionsChangedListener(this, notificationListenerComponent)
-            onActiveSessionsChanged(mediaSessionManager.getActiveSessions(notificationListenerComponent))
+            val componentName = ComponentName(context, MetrolistNotificationListener::class.java)
+            mediaSessionManager.addOnActiveSessionsChangedListener(this, componentName)
+            onActiveSessionsChanged(mediaSessionManager.getActiveSessions(componentName))
         } catch (e: SecurityException) {
+            // This will occur if the user hasn't granted Notification Access yet.
             e.printStackTrace()
         }
     }
