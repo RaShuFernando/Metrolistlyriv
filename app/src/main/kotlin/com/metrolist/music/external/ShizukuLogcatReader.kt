@@ -4,6 +4,7 @@ import android.content.pm.PackageManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import rikka.shizuku.Shizuku
 import java.io.BufferedReader
 import java.io.InputStreamReader
 
@@ -13,12 +14,12 @@ object ShizukuLogcatReader {
     private const val SHIZUKU_REQ_CODE = 1001
 
     suspend fun extractVideoId(): String? = withContext(Dispatchers.IO) {
-        if (!ShizukuWrapper.pingBinder()) {
+        if (!Shizuku.pingBinder()) {
             return@withContext null
         }
         
-        if (ShizukuWrapper.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
-            ShizukuWrapper.requestPermission(SHIZUKU_REQ_CODE)
+        if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
+            Shizuku.requestPermission(SHIZUKU_REQ_CODE)
             return@withContext null
         }
 
@@ -39,7 +40,26 @@ object ShizukuLogcatReader {
     }
 
     private fun createProcess(command: Array<String>): Process {
-        return ShizukuWrapper.executeCommand(command)
+        return try {
+            // Find the newProcess method dynamically to bypass visibility restrictions
+            val newProcessMethod = rikka.shizuku.Shizuku::class.java.getDeclaredMethod(
+                "newProcess",
+                Array<String>::class.java,
+                Array<String>::class.java,
+                String::class.java
+            )
+            
+            // Ensure it's accessible even if marked private
+            newProcessMethod.isAccessible = true
+            
+            // Invoke it and cast strictly to the standard java.lang.Process interface
+            newProcessMethod.invoke(null, command, null, null) as Process
+        } catch (e: Exception) {
+            e.printStackTrace()
+            // Fallback to standard runtime execution if Shizuku reflection fails
+            // Note: This fallback will not have ADB privileges, but prevents a hard crash
+            Runtime.getRuntime().exec(command)
+        }
     }
 
     private suspend fun readLogcat(): String? = withContext(Dispatchers.IO) {
