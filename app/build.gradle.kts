@@ -410,8 +410,6 @@ dependencies {
     // Protobuf for message serialization (lite version for Android)
     implementation(libs.protobuf.javalite)
     implementation(libs.protobuf.kotlin.lite)
-    implementation(libs.shizuku.api)
-    implementation(libs.shizuku.provider)
 
     coreLibraryDesugaring(libs.desugaring)
 
