@@ -23,6 +23,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -43,6 +44,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.graphics.graphicsLayer
@@ -52,6 +54,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.draw.blur
+import androidx.compose.animation.core.animateDp
+import androidx.compose.animation.core.animateFloat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
@@ -219,21 +224,25 @@ class OverlayLyricsService : Service() {
                 val uiState by currentUiState.collectAsState()
                 val isPlaying by isPlaying.collectAsState()
                 
-                // Dedicated Position Ticker that emits to a Compose State
-                val tickerState = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(currentPositionMs.value) }
-                androidx.compose.runtime.LaunchedEffect(isPlaying) {
-                    if (isPlaying) {
-                        while (true) {
-                            tickerState.value = currentPositionMs.value
-                            kotlinx.coroutines.delay(50)
-                        }
-                    }
-                }
-                
-                val currentPositionProvider = { tickerState.value }
+                val positionMs by currentPositionMs.collectAsState()
+                val currentPositionProvider = { positionMs }
                 val fontSizeSp by OverlayLyricsPreferences.getOverlayFontSize(this@OverlayLyricsService)
                     .collectAsState(initial = 18f)
                 val enabled by OverlayLyricsPreferences.getOverlayEnabled(this@OverlayLyricsService)
+                    .collectAsState(initial = true)
+                val lineAnimation by OverlayLyricsPreferences.getLineAnimation(this@OverlayLyricsService)
+                    .collectAsState(initial = 2)
+                val wordAnimation by OverlayLyricsPreferences.getWordAnimation(this@OverlayLyricsService)
+                    .collectAsState(initial = 2)
+                val activeWordColor by OverlayLyricsPreferences.getActiveWordColor(this@OverlayLyricsService)
+                    .collectAsState(initial = android.graphics.Color.parseColor("#FFD700"))
+                val activeLineColor by OverlayLyricsPreferences.getActiveLineColor(this@OverlayLyricsService)
+                    .collectAsState(initial = android.graphics.Color.WHITE)
+                val inactiveLineColor by OverlayLyricsPreferences.getInactiveLineColor(this@OverlayLyricsService)
+                    .collectAsState(initial = android.graphics.Color.parseColor("#A6FFFFFF"))
+                val showRomanized by OverlayLyricsPreferences.getShowRomanizedLyrics(this@OverlayLyricsService)
+                    .collectAsState(initial = true)
+                val showTranslated by OverlayLyricsPreferences.getShowTranslatedLyrics(this@OverlayLyricsService)
                     .collectAsState(initial = true)
 
                 if (enabled) {
@@ -249,7 +258,14 @@ class OverlayLyricsService : Service() {
                                 OverlayLyricsView(
                                     overlayLyrics = lyrics,
                                     currentPositionProvider = currentPositionProvider,
-                                    fontSizeSp = fontSizeSp
+                                    fontSizeSp = fontSizeSp,
+                                    lineAnimation = lineAnimation,
+                                    wordAnimation = wordAnimation,
+                                    activeWordColor = activeWordColor,
+                                    activeLineColor = activeLineColor,
+                                    inactiveLineColor = inactiveLineColor,
+                                    showRomanized = showRomanized,
+                                    showTranslated = showTranslated
                                 )
                             }
                         }
@@ -334,6 +350,7 @@ class OverlayLyricsService : Service() {
 
         if (composeView != null && windowManager != null) {
             try {
+                composeView?.disposeComposition()
                 windowManager?.removeView(composeView)
             } catch (_: Exception) {}
         }
@@ -347,66 +364,176 @@ class OverlayLyricsService : Service() {
 fun OverlayLyricsView(
     overlayLyrics: ParsedOverlayLyrics,
     currentPositionProvider: () -> Long,
-    fontSizeSp: Float
+    fontSizeSp: Float,
+    lineAnimation: Int,
+    wordAnimation: Int,
+    activeWordColor: Int,
+    activeLineColor: Int,
+    inactiveLineColor: Int,
+    showRomanized: Boolean,
+    showTranslated: Boolean
 ) {
-    val activeLines by androidx.compose.runtime.remember(overlayLyrics.lines) {
-        androidx.compose.runtime.derivedStateOf {
-            val positionMs = currentPositionProvider()
-            val lines = overlayLyrics.lines
-            if (lines.isEmpty()) emptyList()
-            else {
-                lines.filter { positionMs in it.startTimeMs..it.endTimeMs }
-            }
-        }
-    }
+    val backgroundColor by OverlayLyricsPreferences.getBackgroundColor(LocalContext.current)
+        .collectAsState(initial = android.graphics.Color.TRANSPARENT)
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
+            .background(Color(backgroundColor))
             .padding(16.dp),
         contentAlignment = Alignment.Center
     ) {
+        val enterTransition = when (lineAnimation) {
+            1 -> fadeIn()
+            2 -> slideInVertically { it } + fadeIn()
+            3 -> androidx.compose.animation.scaleIn() + fadeIn()
+            4 -> fadeIn() // 3D Flip fallback enter
+            5 -> fadeIn() // Blur Reveal fallback enter
+            else -> androidx.compose.animation.EnterTransition.None
+        }
+        val exitTransition = when (lineAnimation) {
+            1 -> fadeOut() + androidx.compose.animation.shrinkVertically(shrinkTowards = Alignment.Top)
+            2 -> slideOutVertically { -it } + fadeOut() + androidx.compose.animation.shrinkVertically(shrinkTowards = Alignment.Top)
+            3 -> androidx.compose.animation.scaleOut() + fadeOut() + androidx.compose.animation.shrinkVertically(shrinkTowards = Alignment.Top)
+            4 -> fadeOut() + androidx.compose.animation.shrinkVertically(shrinkTowards = Alignment.Top)
+            5 -> fadeOut() + androidx.compose.animation.shrinkVertically(shrinkTowards = Alignment.Top)
+            else -> androidx.compose.animation.ExitTransition.None
+        }
+
         Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            modifier = Modifier.fillMaxWidth()
         ) {
-            activeLines.forEach { line ->
-                if (line.text.isNotBlank()) {
-                    val hasWordTimestamps = line.words.isNotEmpty()
-
-                    if (hasWordTimestamps) {
-                        WordSyncedLyricLine(
-                            line = line,
-                            currentPositionProvider = currentPositionProvider,
-                            fontSizeSp = fontSizeSp
-                        )
-                    } else {
-                        val isBg = line.isBackground
-                        val textAlign = when {
-                            isBg -> TextAlign.Right
-                            line.agent == "v2" -> TextAlign.Right
-                            else -> TextAlign.Start
+            val positionMs = currentPositionProvider()
+            val windowLines = overlayLyrics.lines.filter { 
+                it.startTimeMs <= positionMs + 4000 && it.endTimeMs >= positionMs - 3000 
+            }
+            
+            windowLines.forEach { line ->
+                val isLineVisible by androidx.compose.runtime.remember(line.startTimeMs, line.endTimeMs) { 
+                    androidx.compose.runtime.derivedStateOf { 
+                        val pos = currentPositionProvider()
+                        pos in line.startTimeMs..line.endTimeMs
+                    } 
+                }
+                
+                androidx.compose.runtime.key(line.startTimeMs) {
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = isLineVisible,
+                        enter = enterTransition,
+                        exit = exitTransition
+                    ) {
+                        val rotationX by transition.animateFloat(
+                            transitionSpec = { androidx.compose.animation.core.tween() },
+                            label = "rotationX"
+                        ) { enterExitState ->
+                            when (enterExitState) {
+                                androidx.compose.animation.EnterExitState.PreEnter -> -90f
+                                androidx.compose.animation.EnterExitState.Visible -> 0f
+                                androidx.compose.animation.EnterExitState.PostExit -> 90f
+                            }
                         }
-                        val effectiveFontSize = if (isBg) fontSizeSp * 0.85f else fontSizeSp
-                        val baseColor = if (line.agent == "v2") Color(0xFF00E5FF) else Color.White
-                        val finalColor = if (isBg) baseColor.copy(alpha = 0.65f) else baseColor
-
-                        Text(
-                            text = line.text,
-                            style = TextStyle(
-                                fontSize = effectiveFontSize.sp,
-                                fontWeight = FontWeight.Bold,
-                                fontStyle = if (isBg) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal,
-                                color = finalColor,
-                                textAlign = textAlign,
-                                shadow = Shadow(
-                                    color = Color.Black,
-                                    offset = Offset(2f, 2f),
-                                    blurRadius = 8f
-                                )
-                            ),
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                        val blurRadius by transition.animateDp(
+                            transitionSpec = { androidx.compose.animation.core.tween() },
+                            label = "blur"
+                        ) { enterExitState ->
+                            when (enterExitState) {
+                                androidx.compose.animation.EnterExitState.PreEnter -> 8.dp
+                                androidx.compose.animation.EnterExitState.Visible -> 0.dp
+                                androidx.compose.animation.EnterExitState.PostExit -> 8.dp
+                            }
+                        }
+                        val customModifier = when (lineAnimation) {
+                            4 -> Modifier.graphicsLayer { this.rotationX = rotationX }
+                            5 -> Modifier.blur(blurRadius)
+                            else -> Modifier
+                        }
+                        Box(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp).then(customModifier)) {
+                            if (line.text.isNotBlank()) {
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                    val hasWordTimestamps = line.words.isNotEmpty()
+                                    if (hasWordTimestamps) {
+                                        WordSyncedLyricLine(
+                                            line = line,
+                                            currentPositionProvider = currentPositionProvider,
+                                            fontSizeSp = fontSizeSp,
+                                            wordAnimation = wordAnimation,
+                                            activeWordColor = activeWordColor,
+                                            activeLineColor = activeLineColor,
+                                            inactiveLineColor = inactiveLineColor
+                                        )
+                                    } else {
+                                        val isBg = line.isBackground
+                                        val textAlign = when {
+                                            isBg -> TextAlign.Right
+                                            line.agent == "v2" -> TextAlign.Right
+                                            else -> TextAlign.Start
+                                        }
+                                        val effectiveFontSize = if (isBg) fontSizeSp * 0.85f else fontSizeSp
+                                        val baseColor = Color(activeLineColor)
+                                        val finalColor = if (isBg) baseColor.copy(alpha = 0.65f) else baseColor
+    
+                                        Text(
+                                            text = line.text,
+                                            style = TextStyle(
+                                                fontSize = effectiveFontSize.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                fontStyle = if (isBg) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal,
+                                                color = finalColor,
+                                                textAlign = textAlign,
+                                                shadow = Shadow(
+                                                    color = Color.Black,
+                                                    offset = Offset(2f, 2f),
+                                                    blurRadius = 8f
+                                                )
+                                            ),
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+                                    }
+                                    
+                                    val alignment = when {
+                                        line.isBackground -> TextAlign.Right
+                                        line.agent == "v2" -> TextAlign.Right
+                                        else -> TextAlign.Start
+                                    }
+                                    
+                                    if (showRomanized && !line.romanizedText.isNullOrBlank()) {
+                                        Text(
+                                            text = line.romanizedText,
+                                            style = TextStyle(
+                                                fontSize = (fontSizeSp * 0.8f).sp,
+                                                fontWeight = FontWeight.Normal,
+                                                color = Color(activeLineColor).copy(alpha = 0.8f),
+                                                textAlign = alignment,
+                                                shadow = Shadow(
+                                                    color = Color.Black,
+                                                    offset = Offset(2f, 2f),
+                                                    blurRadius = 8f
+                                                )
+                                            ),
+                                            modifier = Modifier.fillMaxWidth().padding(top = 2.dp)
+                                        )
+                                    }
+                                    
+                                    if (showTranslated && !line.translatedText.isNullOrBlank()) {
+                                        Text(
+                                            text = line.translatedText,
+                                            style = TextStyle(
+                                                fontSize = (fontSizeSp * 0.75f).sp,
+                                                fontWeight = FontWeight.Normal,
+                                                color = Color(activeLineColor).copy(alpha = 0.7f),
+                                                textAlign = alignment,
+                                                shadow = Shadow(
+                                                    color = Color.Black,
+                                                    offset = Offset(2f, 2f),
+                                                    blurRadius = 8f
+                                                )
+                                            ),
+                                            modifier = Modifier.fillMaxWidth().padding(top = 2.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -418,59 +545,137 @@ fun OverlayLyricsView(
 fun WordSyncedLyricLine(
     line: OverlayLyricLine,
     currentPositionProvider: () -> Long,
-    fontSizeSp: Float
+    fontSizeSp: Float,
+    wordAnimation: Int,
+    activeWordColor: Int,
+    activeLineColor: Int,
+    inactiveLineColor: Int
 ) {
     val words = line.words
 
-    // Agent alignment logic
+    // Agent alignment logic for the whole line
     val isBg = line.isBackground
-    val textAlign = when {
-        isBg -> TextAlign.Right
-        line.agent == "v2" -> TextAlign.Right
-        else -> TextAlign.Start
+    
+    val groupedWords = words.groupBy { word ->
+        when {
+            word.isBackground || isBg -> "bg"
+            word.agent == "v2" || line.agent == "v2" -> "v2"
+            else -> "v1"
+        }
     }
-    val effectiveFontSize = if (isBg) fontSizeSp * 0.85f else fontSizeSp
-    val baseColor = if (line.agent == "v2") Color(0xFF00E5FF) else Color.White
 
-    androidx.compose.foundation.layout.FlowRow(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = if (textAlign == TextAlign.Right) Arrangement.End else Arrangement.Start
-    ) {
-        words.forEach { word ->
-            val isActive by androidx.compose.runtime.remember { androidx.compose.runtime.derivedStateOf { currentPositionProvider() in word.startTimeMs..word.endTimeMs } }
-            val isPassed by androidx.compose.runtime.remember { androidx.compose.runtime.derivedStateOf { currentPositionProvider() > word.endTimeMs } }
+    Column(modifier = Modifier.fillMaxWidth()) {
+        groupedWords.forEach { (agentKey, agentWords) ->
+            val textAlign = when (agentKey) {
+                "bg", "v2" -> TextAlign.Right
+                else -> TextAlign.Start
+            }
+            val effectiveFontSize = if (agentKey == "bg") fontSizeSp * 0.85f else fontSizeSp
 
-            val scale by animateFloatAsState(targetValue = if (isActive) 1.1f else 1.0f, label = "ScaleAnim")
-            
-            val wordFontSize = if (word.isBackground) effectiveFontSize * 0.85f else effectiveFontSize
-            
-            val color by animateColorAsState(
-                targetValue = when {
-                    isActive -> Color(0xFFFFD700) // Vibrant Gold highlight
-                    isPassed -> baseColor
-                    else -> baseColor.copy(alpha = if (word.isBackground || isBg) 0.65f else 0.6f)
-                },
-                label = "ColorAnim"
-            )
+            androidx.compose.foundation.layout.FlowRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(if (textAlign == TextAlign.Right) Alignment.End else Alignment.Start),
+                horizontalArrangement = if (textAlign == TextAlign.Right) Arrangement.End else Arrangement.Start
+            ) {
+                agentWords.forEach { word ->
+                    val isActive by androidx.compose.runtime.remember(word.startTimeMs, word.endTimeMs) { androidx.compose.runtime.derivedStateOf { currentPositionProvider() in word.startTimeMs..word.endTimeMs } }
+                    val isPassed by androidx.compose.runtime.remember(word.endTimeMs) { androidx.compose.runtime.derivedStateOf { currentPositionProvider() > word.endTimeMs } }
 
-            Text(
-                text = word.text + if (word.hasTrailingSpace) " " else "",
-                color = color,
-                style = TextStyle(
-                    fontSize = wordFontSize.sp,
-                    fontWeight = if (isActive) FontWeight.ExtraBold else FontWeight.Bold,
-                    fontStyle = if (word.isBackground || isBg) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal,
-                    shadow = Shadow(
-                        color = Color.Black,
-                        offset = Offset(2f, 2f),
-                        blurRadius = 8f
+                    val scale by animateFloatAsState(
+                        targetValue = if (isActive && (wordAnimation == 2 || wordAnimation == 5)) 1.15f else 1.0f,
+                        animationSpec = if (wordAnimation == 5) androidx.compose.animation.core.spring(dampingRatio = 0.3f, stiffness = 800f)
+                                        else if (wordAnimation == 2) androidx.compose.animation.core.spring(dampingRatio = 0.5f, stiffness = 500f)
+                                        else androidx.compose.animation.core.tween(),
+                        label = "ScaleAnim"
                     )
-                ),
-                modifier = Modifier.graphicsLayer {
-                    scaleX = scale
-                    scaleY = scale
+                    
+                    val shadowRadius by animateFloatAsState(
+                        targetValue = if (isActive && wordAnimation == 3) 16f else 8f,
+                        label = "GlowAnim"
+                    )
+
+                    val translateY by animateFloatAsState(
+                        targetValue = if (isActive && wordAnimation == 4) -10f else 0f,
+                        animationSpec = androidx.compose.animation.core.spring(dampingRatio = 0.5f, stiffness = 500f),
+                        label = "TranslateYAnim"
+                    )
+
+                    val karaokeProgress by androidx.compose.runtime.remember(word.startTimeMs, word.endTimeMs, wordAnimation) {
+                        androidx.compose.runtime.derivedStateOf {
+                            if (wordAnimation == 6) {
+                                val pos = currentPositionProvider()
+                                val durationMs = word.endTimeMs - word.startTimeMs
+                                if (durationMs > 0) {
+                                    ((pos - word.startTimeMs).toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+                                } else {
+                                    if (pos > word.endTimeMs) 1f else 0f
+                                }
+                            } else {
+                                0f
+                            }
+                        }
+                    }
+                    
+                    val color by animateColorAsState(
+                        targetValue = when {
+                            isActive && wordAnimation != 6 -> Color(activeWordColor)
+                            isPassed && wordAnimation != 6 -> Color(activeLineColor)
+                            else -> Color(inactiveLineColor)
+                        },
+                        label = "ColorAnim"
+                    )
+
+                    val brush = if (wordAnimation == 6) {
+                        val activeColor = Color(activeWordColor)
+                        val inactiveColor = Color(inactiveLineColor)
+                        androidx.compose.ui.graphics.Brush.linearGradient(
+                            colorStops = arrayOf(
+                                0f to activeColor,
+                                karaokeProgress to activeColor,
+                                karaokeProgress to inactiveColor,
+                                1f to inactiveColor
+                            )
+                        )
+                    } else null
+                    
+                    val style = if (brush != null) {
+                        TextStyle(
+                            brush = brush,
+                            fontSize = effectiveFontSize.sp,
+                            fontWeight = if (isActive) FontWeight.ExtraBold else FontWeight.Bold,
+                            fontStyle = if (agentKey == "bg") androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal,
+                            shadow = Shadow(
+                                color = if (isActive && wordAnimation == 3) Color(activeWordColor) else Color.Black,
+                                offset = Offset(2f, 2f),
+                                blurRadius = shadowRadius
+                            )
+                        )
+                    } else {
+                        TextStyle(
+                            fontSize = effectiveFontSize.sp,
+                            fontWeight = if (isActive) FontWeight.ExtraBold else FontWeight.Bold,
+                            fontStyle = if (agentKey == "bg") androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal,
+                            shadow = Shadow(
+                                color = if (isActive && wordAnimation == 3) Color(activeWordColor) else Color.Black,
+                                offset = Offset(2f, 2f),
+                                blurRadius = shadowRadius
+                            )
+                        )
+                    }
+
+                    Text(
+                        text = word.text + if (word.hasTrailingSpace) " " else "",
+                        color = if (wordAnimation == 6) Color.Unspecified else color,
+                        style = style,
+                        modifier = Modifier.graphicsLayer {
+                            scaleX = scale
+                            scaleY = scale
+                            this.translationY = translateY
+                        }
+                    )
                 }
-            )
+            }
         }
     }
 }

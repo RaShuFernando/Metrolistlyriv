@@ -9,6 +9,8 @@ import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
 
+class RateLimitException(message: String) : Exception(message)
+
 object BetterLyricsDownloader {
     
     private val client = OkHttpClient.Builder()
@@ -49,6 +51,9 @@ object BetterLyricsDownloader {
                 .build()
 
             client.newCall(request).execute().use { response ->
+                if (response.code == 429) {
+                    throw RateLimitException("HTTP 429 Too Many Requests")
+                }
                 if (!response.isSuccessful) return@use null
 
                 val body = response.body ?: return@use null

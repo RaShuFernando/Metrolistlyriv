@@ -50,6 +50,16 @@ interface LibraryDao {
     """)
     suspend fun checkSongExists(title: String, artist: String): SongEntity?
 
+    @Query("""
+        SELECT EXISTS(
+            SELECT 1 FROM songs 
+            INNER JOIN albums ON songs.albumId = albums.id 
+            INNER JOIN artists ON albums.artistId = artists.id 
+            WHERE songs.title = :title AND artists.name = :artist LIMIT 1
+        )
+    """)
+    suspend fun checkSongExistsFast(title: String, artist: String): Boolean
+
     @Query("UPDATE songs SET lastCheckedAt = :timestamp, hasLyricsAvailable = :hasLyrics WHERE id = :songId")
     suspend fun updateSongCheckStatus(songId: Int, timestamp: Long, hasLyrics: Boolean)
 
@@ -69,5 +79,21 @@ interface LibraryDao {
 
     @Query("UPDATE song_index SET activeLyricFile = :activeLyricFile WHERE videoId = :videoId")
     suspend fun updateActiveLyricFile(videoId: String, activeLyricFile: String)
+
+    @Transaction
+    suspend fun insertFullSongData(artist: ArtistEntity, album: AlbumEntity, song: SongEntity, file: FileEntity) {
+        val artistId = insertArtist(artist)
+        val finalArtistId = if (artistId == -1L) getArtistByName(artist.name)?.id?.toLong() ?: return else artistId
+        
+        val albumToInsert = album.copy(artistId = finalArtistId.toInt())
+        val albumId = insertAlbum(albumToInsert)
+        val finalAlbumId = if (albumId == -1L) getAlbumByNameAndArtist(albumToInsert.name, finalArtistId.toInt())?.id?.toLong() ?: return else albumId
+        
+        val songToInsert = song.copy(albumId = finalAlbumId.toInt())
+        val songId = insertSong(songToInsert)
+        val finalSongId = if (songId == -1L) getSongByTitleAndAlbum(songToInsert.title, finalAlbumId.toInt())?.id?.toLong() ?: return else songId
+        
+        insertFile(file.copy(songId = finalSongId.toInt()))
+    }
 }
 

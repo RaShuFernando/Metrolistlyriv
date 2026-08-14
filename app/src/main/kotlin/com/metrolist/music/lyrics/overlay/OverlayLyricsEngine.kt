@@ -26,7 +26,9 @@ data class OverlayLyricWord(
     val startTimeMs: Long,
     val endTimeMs: Long,
     val hasTrailingSpace: Boolean,
-    val isBackground: Boolean = false
+    val isBackground: Boolean = false,
+    val agent: String? = null,
+    val romanizedText: String? = null
 )
 
 data class OverlayLyricLine(
@@ -35,7 +37,9 @@ data class OverlayLyricLine(
     val endTimeMs: Long,
     val words: List<OverlayLyricWord>,
     val agent: String?,
-    val isBackground: Boolean
+    val isBackground: Boolean,
+    val romanizedText: String? = null,
+    val translatedText: String? = null
 )
 
 fun List<LyricsEntry>.toOverlayLyricLines(): List<OverlayLyricLine> {
@@ -92,11 +96,16 @@ object OverlayLyricsEngine {
         lruCache.evictAll()
     }
 
+    fun clearCacheForVideoId(videoId: String) {
+        lruCache.remove(videoId)
+    }
+
     suspend fun loadDirectLyricFile(
         context: Context,
         videoId: String,
         folderPath: String,
-        activeLyricFile: String
+        activeLyricFile: String,
+        offsetMs: Long = 0L
     ): ParsedOverlayLyrics? = withContext(Dispatchers.IO) {
         val path = if (activeLyricFile.startsWith("content://") || activeLyricFile.startsWith("/")) {
             activeLyricFile
@@ -143,13 +152,26 @@ object OverlayLyricsEngine {
                 return@withContext null
             }
 
-            Log.e("LyricsEngine", "Successfully parsed ${lines.size} lines")
+            val offsetLines = lines.map { line ->
+                line.copy(
+                    startTimeMs = line.startTimeMs + offsetMs,
+                    endTimeMs = line.endTimeMs + offsetMs,
+                    words = line.words.map { word ->
+                        word.copy(
+                            startTimeMs = word.startTimeMs + offsetMs,
+                            endTimeMs = word.endTimeMs + offsetMs
+                        )
+                    }
+                )
+            }
+
+            Log.e("LyricsEngine", "Successfully parsed ${offsetLines.size} lines")
 
             val parsedOverlayLyrics = ParsedOverlayLyrics(
                 videoId = videoId,
                 folderPath = folderPath,
                 filename = activeLyricFile,
-                lines = lines
+                lines = offsetLines
             )
             lruCache.put(videoId, parsedOverlayLyrics)
             parsedOverlayLyrics
@@ -185,22 +207,26 @@ object OverlayLyricsEngine {
                     File(index.folderPath, "metadata.json").absolutePath
                 }
 
-                try {
-                    if (metadataPath.startsWith("content://")) {
-                        context.applicationContext.contentResolver.openInputStream(Uri.parse(metadataPath))?.use {
-                            metadataContent = it.bufferedReader().readText()
+                metadataContent = withContext(Dispatchers.IO) {
+                    try {
+                        if (metadataPath.startsWith("content://")) {
+                            context.applicationContext.contentResolver.openInputStream(Uri.parse(metadataPath))?.use {
+                                it.bufferedReader().readText()
+                            }
+                        } else {
+                            val metadataFile = File(metadataPath)
+                            if (metadataFile.exists()) {
+                                metadataFile.readText()
+                            } else null
                         }
-                    } else {
-                        val metadataFile = File(metadataPath)
-                        if (metadataFile.exists()) {
-                            metadataContent = metadataFile.readText()
-                        }
+                    } catch (e: Exception) {
+                        Log.e("LyricsEngine", "Failed to read metadata: ${e.message}")
+                        null
                     }
-                } catch (e: Exception) {
-                    Log.e("LyricsEngine", "Failed to read metadata: ${e.message}")
                 }
 
                 var resolvedActiveFile: String? = null
+                var resolvedOffsetMs: Long = 0L
                 
                 if (metadataContent != null) {
                     try {
@@ -216,6 +242,10 @@ object OverlayLyricsEngine {
                         if (resolvedActiveFile == null) {
                             resolvedActiveFile = metadata.lyrics.minByOrNull { it.rank }?.filename
                         }
+
+                        if (resolvedActiveFile != null) {
+                            resolvedOffsetMs = metadata.lyrics.find { it.filename == resolvedActiveFile }?.offsetMs ?: 0L
+                        }
                     } catch (e: Exception) {
                         Log.e("LyricsEngine", "Failed to parse metadata: ${e.message}")
                         resolvedActiveFile = index.activeLyricFile
@@ -225,7 +255,7 @@ object OverlayLyricsEngine {
                 }
 
                 if (!resolvedActiveFile.isNullOrBlank()) {
-                    parsed = loadDirectLyricFile(context, videoId, index.folderPath, resolvedActiveFile!!)
+                    parsed = loadDirectLyricFile(context, videoId, index.folderPath, resolvedActiveFile!!, resolvedOffsetMs)
                 }
             }
             

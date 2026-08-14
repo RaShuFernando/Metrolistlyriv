@@ -41,6 +41,13 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.ui.draw.clip
 import com.metrolist.music.LocalPlayerAwareWindowInsets
 import com.metrolist.music.R
 import com.metrolist.music.lyrics.overlay.OverlayLyricsEngine
@@ -52,6 +59,7 @@ import com.metrolist.music.lyrics.vault.LyricsSyncManager
 import com.metrolist.music.lyrics.vault.VaultManager
 import com.metrolist.music.ui.component.Material3SettingsGroup
 import com.metrolist.music.ui.component.Material3SettingsItem
+import com.metrolist.music.ui.utils.ShowOffsetDialog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -67,6 +75,8 @@ fun OverlayLyricsSettingsScreen(
 
     val enabled by OverlayLyricsPreferences.getOverlayEnabled(context).collectAsState(initial = false)
     val fontSize by OverlayLyricsPreferences.getOverlayFontSize(context).collectAsState(initial = 18f)
+    val showRomanized by OverlayLyricsPreferences.getShowRomanizedLyrics(context).collectAsState(initial = true)
+    val showTranslated by OverlayLyricsPreferences.getShowTranslatedLyrics(context).collectAsState(initial = true)
 
     val currentVideoId by OverlayLyricsService.currentVideoId.collectAsState()
 
@@ -74,6 +84,33 @@ fun OverlayLyricsSettingsScreen(
     var availableVersions by remember { mutableStateOf<List<LyricFileInfo>>(emptyList()) }
     var activeFilename by remember { mutableStateOf<String?>(null) }
     var parsedVaultDir by remember { mutableStateOf<File?>(null) }
+    
+    var showOffsetDialogForTrack by remember { mutableStateOf(false) }
+    var trackOffsetMs by remember { mutableStateOf(0L) }
+    var trackVaultDir by remember { mutableStateOf<File?>(null) }
+    var trackActiveFile by remember { mutableStateOf("") }
+    
+    val lineAnimation by OverlayLyricsPreferences.getLineAnimation(context).collectAsState(initial = 2)
+    val wordAnimation by OverlayLyricsPreferences.getWordAnimation(context).collectAsState(initial = 2)
+    val activeWordColor by OverlayLyricsPreferences.getActiveWordColor(context).collectAsState(initial = android.graphics.Color.parseColor("#FFD700"))
+    val activeLineColor by OverlayLyricsPreferences.getActiveLineColor(context).collectAsState(initial = android.graphics.Color.WHITE)
+    val inactiveLineColor by OverlayLyricsPreferences.getInactiveLineColor(context).collectAsState(initial = android.graphics.Color.parseColor("#A6FFFFFF"))
+    val backgroundColor by OverlayLyricsPreferences.getBackgroundColor(context).collectAsState(initial = android.graphics.Color.TRANSPARENT)
+    
+    var showLineAnimationDialog by remember { mutableStateOf(false) }
+    var showWordAnimationDialog by remember { mutableStateOf(false) }
+    var activeColorDialog by remember { mutableStateOf<String?>(null) }
+    
+    val colorPalette = remember {
+        listOf(
+            android.graphics.Color.WHITE,
+            android.graphics.Color.parseColor("#FFD700"),
+            android.graphics.Color.parseColor("#00E5FF"),
+            android.graphics.Color.parseColor("#FF4081"),
+            android.graphics.Color.parseColor("#76FF03"),
+            android.graphics.Color.parseColor("#A6FFFFFF")
+        )
+    }
 
     LaunchedEffect(currentVideoId) {
         if (currentVideoId.isBlank()) {
@@ -165,6 +202,60 @@ fun OverlayLyricsSettingsScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
+            // Animations Section
+            Material3SettingsGroup(
+                title = stringResource(R.string.customize_animations),
+                items = listOf(
+                    Material3SettingsItem(
+                        icon = painterResource(R.drawable.tune), // assuming a generic icon, we can use tune or play_circle
+                        title = { Text(stringResource(R.string.overlay_lyrics_line_animation)) },
+                        description = { Text(stringResource(R.string.overlay_lyrics_line_animation_desc)) },
+                        onClick = { showLineAnimationDialog = true }
+                    ),
+                    Material3SettingsItem(
+                        icon = painterResource(R.drawable.tune),
+                        title = { Text(stringResource(R.string.overlay_lyrics_word_animation)) },
+                        description = { Text(stringResource(R.string.overlay_lyrics_word_animation_desc)) },
+                        onClick = { showWordAnimationDialog = true }
+                    )
+                )
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Colors Section
+            Material3SettingsGroup(
+                title = stringResource(R.string.customize_colors),
+                items = listOf(
+                    Material3SettingsItem(
+                        icon = painterResource(R.drawable.palette), // assuming palette exists
+                        title = { Text(stringResource(R.string.overlay_lyrics_active_word_color)) },
+                        description = { Text("Choose highlight color for the active word") },
+                        onClick = { activeColorDialog = "activeWord" }
+                    ),
+                    Material3SettingsItem(
+                        icon = painterResource(R.drawable.palette),
+                        title = { Text(stringResource(R.string.overlay_lyrics_active_line_color)) },
+                        description = { Text("Choose color for the active line") },
+                        onClick = { activeColorDialog = "activeLine" }
+                    ),
+                    Material3SettingsItem(
+                        icon = painterResource(R.drawable.palette),
+                        title = { Text(stringResource(R.string.overlay_lyrics_inactive_line_color)) },
+                        description = { Text("Choose color for the inactive lines") },
+                        onClick = { activeColorDialog = "inactiveLine" }
+                    ),
+                    Material3SettingsItem(
+                        icon = painterResource(R.drawable.palette),
+                        title = { Text("Background Color") },
+                        description = { Text("Choose background color for the overlay") },
+                        onClick = { activeColorDialog = "background" }
+                    )
+                )
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
             // Customization Section
             Material3SettingsGroup(
                 title = stringResource(R.string.customize_colors),
@@ -189,6 +280,36 @@ fun OverlayLyricsSettingsScreen(
                         }
                     ),
                     Material3SettingsItem(
+                        icon = painterResource(R.drawable.translate), // Assuming translate icon exists or reuse something similar, maybe explicitly R.drawable.translate
+                        title = { Text(stringResource(R.string.overlay_lyrics_show_romanized)) },
+                        description = { Text(stringResource(R.string.overlay_lyrics_show_romanized_desc)) },
+                        trailingContent = {
+                            Switch(
+                                checked = showRomanized,
+                                onCheckedChange = { newValue ->
+                                    coroutineScope.launch {
+                                        OverlayLyricsPreferences.setShowRomanizedLyrics(context, newValue)
+                                    }
+                                }
+                            )
+                        }
+                    ),
+                    Material3SettingsItem(
+                        icon = painterResource(R.drawable.translate),
+                        title = { Text(stringResource(R.string.overlay_lyrics_show_translated)) },
+                        description = { Text(stringResource(R.string.overlay_lyrics_show_translated_desc)) },
+                        trailingContent = {
+                            Switch(
+                                checked = showTranslated,
+                                onCheckedChange = { newValue ->
+                                    coroutineScope.launch {
+                                        OverlayLyricsPreferences.setShowTranslatedLyrics(context, newValue)
+                                    }
+                                }
+                            )
+                        }
+                    ),
+                    Material3SettingsItem(
                         icon = painterResource(R.drawable.tune),
                         title = { Text(stringResource(R.string.overlay_lyrics_version_selector)) },
                         description = { Text(stringResource(R.string.overlay_lyrics_version_selector_desc)) },
@@ -197,6 +318,95 @@ fun OverlayLyricsSettingsScreen(
                                 Toast.makeText(context, context.getString(R.string.no_song_playing), Toast.LENGTH_SHORT).show()
                             } else {
                                 showVersionDialog = true
+                            }
+                        }
+                    ),
+                    Material3SettingsItem(
+                        icon = painterResource(R.drawable.fast_forward),
+                        title = { Text("Lyric Timing Offset") },
+                        description = { Text("Adjust the lyric timing for the current song") },
+                        onClick = {
+                            if (currentVideoId.isBlank()) {
+                                Toast.makeText(context, "Play a synced song to adjust offset.", Toast.LENGTH_SHORT).show()
+                            } else {
+                                coroutineScope.launch(Dispatchers.IO) {
+                                    val masterPath = LyricsSyncManager.getMasterFolderPath()
+                                    val dao = DatabaseProvider.getDatabase(context, masterPath).libraryDao()
+                                    val index = dao.getSongIndexByVideoId(currentVideoId)
+                                    if (index == null || !File(index.folderPath).exists()) {
+                                        withContext(Dispatchers.Main) {
+                                            Toast.makeText(context, "Play a synced song to adjust offset.", Toast.LENGTH_SHORT).show()
+                                        }
+                                        return@launch
+                                    }
+                                    
+                                    val dir = File(index.folderPath)
+                                    val vaultManager = VaultManager(masterPath)
+                                    val metadata = vaultManager.readMetadataJson(dir)
+                                    val activeFile = metadata?.active_lyric_file ?: metadata?.lyrics?.minByOrNull { it.rank }?.filename
+                                    
+                                    if (metadata == null || activeFile == null) {
+                                        withContext(Dispatchers.Main) {
+                                            Toast.makeText(context, "Play a synced song to adjust offset.", Toast.LENGTH_SHORT).show()
+                                        }
+                                        return@launch
+                                    }
+                                    
+                                    val currentOffset = metadata.lyrics.find { it.filename == activeFile }?.offsetMs ?: 0L
+                                    
+                                    withContext(Dispatchers.Main) {
+                                        trackOffsetMs = currentOffset
+                                        trackVaultDir = dir
+                                        trackActiveFile = activeFile
+                                        showOffsetDialogForTrack = true
+                                    }
+                                }
+                            }
+                        }
+                    )
+                )
+            )
+            
+            Spacer(modifier = Modifier.height(16.dp))
+
+            val prefetchEnabled by OverlayLyricsPreferences.getLyricsPrefetchEnabled(context).collectAsState(initial = false)
+            val prefetchCount by OverlayLyricsPreferences.getLyricsPrefetchCount(context).collectAsState(initial = 1)
+
+            Material3SettingsGroup(
+                title = "Database Builder",
+                items = listOf(
+                    Material3SettingsItem(
+                        icon = painterResource(R.drawable.download),
+                        title = { Text("Pre-download upcoming lyrics") },
+                        description = { Text("Automatically downloads lyrics for upcoming songs in the background") },
+                        trailingContent = {
+                            Switch(
+                                checked = prefetchEnabled,
+                                onCheckedChange = { newValue ->
+                                    coroutineScope.launch {
+                                        OverlayLyricsPreferences.setLyricsPrefetchEnabled(context, newValue)
+                                    }
+                                }
+                            )
+                        }
+                    ),
+                    Material3SettingsItem(
+                        icon = painterResource(R.drawable.queue_music),
+                        title = { Text("Songs to pre-download") },
+                        description = {
+                            Column {
+                                Text("$prefetchCount songs", color = if (prefetchEnabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
+                                Slider(
+                                    value = prefetchCount.toFloat(),
+                                    onValueChange = { newSize ->
+                                        coroutineScope.launch {
+                                            OverlayLyricsPreferences.setLyricsPrefetchCount(context, newSize.toInt())
+                                        }
+                                    },
+                                    valueRange = 1f..20f,
+                                    steps = 18,
+                                    enabled = prefetchEnabled
+                                )
                             }
                         }
                     )
@@ -273,6 +483,140 @@ fun OverlayLyricsSettingsScreen(
                         Text(stringResource(R.string.close))
                     }
                 }
+            )
+        }
+
+        if (showLineAnimationDialog) {
+            AlertDialog(
+                onDismissRequest = { showLineAnimationDialog = false },
+                title = { Text(stringResource(R.string.overlay_lyrics_line_animation)) },
+                text = {
+                    Column {
+                        val options = listOf("None", "Fade", "Slide Up", "Scale/Zoom", "3D Flip", "Blur Reveal")
+                        options.forEachIndexed { index, option ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth().clickable {
+                                    coroutineScope.launch { OverlayLyricsPreferences.setLineAnimation(context, index) }
+                                    showLineAnimationDialog = false
+                                }.padding(vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(selected = lineAnimation == index, onClick = null)
+                                Text(text = option, modifier = Modifier.padding(start = 12.dp))
+                            }
+                        }
+                    }
+                },
+                confirmButton = { TextButton(onClick = { showLineAnimationDialog = false }) { Text(stringResource(R.string.close)) } }
+            )
+        }
+
+        if (showWordAnimationDialog) {
+            AlertDialog(
+                onDismissRequest = { showWordAnimationDialog = false },
+                title = { Text(stringResource(R.string.overlay_lyrics_word_animation)) },
+                text = {
+                    Column {
+                        val options = listOf("Color Fill", "None (Color Only)", "Spring Scale", "Glow", "Jump/Lift", "Elastic Pop", "Karaoke Fill")
+                        options.forEachIndexed { index, option ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth().clickable {
+                                    coroutineScope.launch { OverlayLyricsPreferences.setWordAnimation(context, index) }
+                                    showWordAnimationDialog = false
+                                }.padding(vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(selected = wordAnimation == index, onClick = null)
+                                Text(text = option, modifier = Modifier.padding(start = 12.dp))
+                            }
+                        }
+                    }
+                },
+                confirmButton = { TextButton(onClick = { showWordAnimationDialog = false }) { Text(stringResource(R.string.close)) } }
+            )
+        }
+
+        if (activeColorDialog != null) {
+            val initialColor = when (activeColorDialog) {
+                "activeWord" -> activeWordColor
+                "activeLine" -> activeLineColor
+                "inactiveLine" -> inactiveLineColor
+                "background" -> backgroundColor
+                else -> android.graphics.Color.WHITE
+            }
+            
+            var alpha by remember(initialColor) { mutableStateOf(android.graphics.Color.alpha(initialColor) / 255f) }
+            var red by remember(initialColor) { mutableStateOf(android.graphics.Color.red(initialColor) / 255f) }
+            var green by remember(initialColor) { mutableStateOf(android.graphics.Color.green(initialColor) / 255f) }
+            var blue by remember(initialColor) { mutableStateOf(android.graphics.Color.blue(initialColor) / 255f) }
+            
+            val currentColor = Color(red, green, blue, alpha)
+
+            AlertDialog(
+                onDismissRequest = { activeColorDialog = null },
+                title = { Text("Custom Color Picker") },
+                text = {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(60.dp)
+                                .clip(MaterialTheme.shapes.medium)
+                                .background(Color.LightGray)
+                        ) {
+                            Box(modifier = Modifier.matchParentSize().background(currentColor))
+                        }
+                        
+                        Text("Opacity (Alpha): ${(alpha * 100).toInt()}%")
+                        Slider(value = alpha, onValueChange = { alpha = it })
+                        
+                        Text("Red: ${(red * 255).toInt()}")
+                        Slider(value = red, onValueChange = { red = it })
+                        
+                        Text("Green: ${(green * 255).toInt()}")
+                        Slider(value = green, onValueChange = { green = it })
+                        
+                        Text("Blue: ${(blue * 255).toInt()}")
+                        Slider(value = blue, onValueChange = { blue = it })
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            val colorInt = android.graphics.Color.argb(
+                                (alpha * 255).toInt(),
+                                (red * 255).toInt(),
+                                (green * 255).toInt(),
+                                (blue * 255).toInt()
+                            )
+                            coroutineScope.launch {
+                                when (activeColorDialog) {
+                                    "activeWord" -> OverlayLyricsPreferences.setActiveWordColor(context, colorInt)
+                                    "activeLine" -> OverlayLyricsPreferences.setActiveLineColor(context, colorInt)
+                                    "inactiveLine" -> OverlayLyricsPreferences.setInactiveLineColor(context, colorInt)
+                                    "background" -> OverlayLyricsPreferences.setBackgroundColor(context, colorInt)
+                                }
+                                activeColorDialog = null
+                            }
+                        }
+                    ) {
+                        Text("Save")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { activeColorDialog = null }) { Text(stringResource(R.string.close)) }
+                }
+            )
+        }
+        if (showOffsetDialogForTrack && trackVaultDir != null && trackActiveFile.isNotEmpty()) {
+            ShowOffsetDialog(
+                currentOffsetMs = trackOffsetMs,
+                parsedVaultDir = trackVaultDir!!,
+                targetFilename = trackActiveFile,
+                onDismiss = { showOffsetDialogForTrack = false }
             )
         }
     }

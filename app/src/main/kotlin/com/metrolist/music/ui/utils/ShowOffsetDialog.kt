@@ -18,7 +18,13 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -39,6 +45,11 @@ import com.metrolist.music.LocalDatabase
 import com.metrolist.music.R
 import com.metrolist.music.db.entities.SongEntity
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.launch
+import java.io.File
+import com.metrolist.music.lyrics.vault.VaultManager
+import com.metrolist.music.lyrics.vault.LyricsSyncManager
+import com.metrolist.music.lyrics.overlay.OverlayLyricsEngine
 
 @OptIn(FlowPreview::class)
 @Composable
@@ -246,4 +257,86 @@ fun ShowOffsetDialog(songProvider: () -> SongEntity?) {
             )
         }
     }
+}
+
+@Composable
+fun ShowOffsetDialog(
+    currentOffsetMs: Long,
+    parsedVaultDir: File,
+    targetFilename: String,
+    onDismiss: () -> Unit
+) {
+    var offsetMs by remember { mutableStateOf(currentOffsetMs) }
+    var textValue by remember { mutableStateOf(offsetMs.toString()) }
+    val coroutineScope = rememberCoroutineScope()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Lyric Timing Offset") },
+        text = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Button(
+                    onClick = { 
+                        offsetMs -= 100
+                        textValue = offsetMs.toString()
+                    }
+                ) {
+                    Text("-100ms")
+                }
+                
+                Spacer(modifier = Modifier.width(8.dp))
+
+                OutlinedTextField(
+                    value = textValue,
+                    onValueChange = { 
+                        textValue = it
+                        it.toLongOrNull()?.let { newOffset ->
+                            offsetMs = newOffset
+                        }
+                    },
+                    modifier = Modifier.width(120.dp),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    textStyle = androidx.compose.ui.text.TextStyle(textAlign = TextAlign.Center)
+                )
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                Button(
+                    onClick = { 
+                        offsetMs += 100
+                        textValue = offsetMs.toString()
+                    }
+                ) {
+                    Text("+100ms")
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    coroutineScope.launch {
+                        val masterPath = LyricsSyncManager.getMasterFolderPath()
+                        val vaultManager = VaultManager(masterPath)
+                        val updatedMetadata = vaultManager.updateLyricOffset(parsedVaultDir, targetFilename, offsetMs)
+                        if (updatedMetadata != null) {
+                            OverlayLyricsEngine.clearCacheForVideoId(updatedMetadata.videoId)
+                        }
+                        onDismiss()
+                    }
+                }
+            ) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }

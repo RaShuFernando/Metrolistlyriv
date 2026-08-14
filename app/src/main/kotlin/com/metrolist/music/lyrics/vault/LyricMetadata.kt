@@ -9,7 +9,8 @@ data class LyricFileInfo(
     val type: String,
     val format: String,
     @SerialName("file_name") val filename: String,
-    val rank: Int = 99
+    val rank: Int = 99,
+    val offsetMs: Long = 0L
 )
 
 @Serializable

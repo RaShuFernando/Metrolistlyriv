@@ -211,6 +211,7 @@
 
     <string name="import_online">Import an M3U playlist</string>
     <string name="import_csv">Import a CSV playlist</string>
+    <string name="playlist_unavailable">Playlist unavailable</string>
     <string name="playlist_add_local_to_synced_note">NOTE: Adding local songs to synced or remote playlists is not supported. Any other combination is valid</string>
     <string name="export_playlist">Export playlist</string>
     <string name="export_as_csv">Export as CSV</string>
@@ -962,6 +963,9 @@
     <string name="android_auto_target_playlist_auto">Not set</string>
     <string name="added_to_playlist">Added to playlist</string>
     <string name="android_auto_target_playlist_not_set">No playlist selected. Choose one in Android Auto settings</string>
+    <string name="android_auto_search_options">Search options</string>
+    <string name="android_auto_search_local_songs_limit">Songs search limit</string>
+    <string name="android_auto_search_local_songs_limit_desc">Limit the number of local songs shown in the search results. It is recommended to not set unlimited to prevent memory crashes</string>
 
     <!-- Stats time transfer -->
     <string name="time_transfer_title">Time transfer</string>
@@ -1040,5 +1044,19 @@
     <string name="no_versions_found">No lyric versions found for current song</string>
     <string name="prefetch_upcoming_lyrics">Pre-fetch Upcoming Lyrics</string>
     <string name="prefetch_upcoming_lyrics_desc">Automatically download and save lyrics for the next 10 songs in the queue.</string>
+    <string name="overlay_lyrics_show_romanized">Show Romanized Lyrics</string>
+    <string name="overlay_lyrics_show_romanized_desc">Display transliterations below original lyrics if available</string>
+    <string name="overlay_lyrics_show_translated">Show Translated Lyrics</string>
+    <string name="overlay_lyrics_show_translated_desc">Display English translations below original lyrics if available</string>
+    
+    <string name="overlay_lyrics_line_animation">Line Sync Animation</string>
+    <string name="overlay_lyrics_line_animation_desc">Animation when the active line changes</string>
+    <string name="overlay_lyrics_word_animation">Word Sync Animation</string>
+    <string name="overlay_lyrics_word_animation_desc">Animation when individual words become active</string>
+    <string name="customize_animations">Animations</string>
+
+    <string name="overlay_lyrics_active_word_color">Active Word Color</string>
+    <string name="overlay_lyrics_active_line_color">Active Line Color</string>
+    <string name="overlay_lyrics_inactive_line_color">Inactive Line Color</string>
 </resources>
 

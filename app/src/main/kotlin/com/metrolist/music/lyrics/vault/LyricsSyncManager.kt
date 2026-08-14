@@ -114,6 +114,8 @@ object LyricsSyncManager {
                     FileLogger.e(TAG, "TurnstileTimeout on attempt $attempt for ${metadata.title}: ${e.message}", e)
                     authenticator.clearCachedToken()
                     if (attempt >= maxAttempts) break
+                } catch (e: RateLimitException) {
+                    throw e // Propagate to prefetcher
                 } catch (e: Exception) {
                     FileLogger.e(TAG, "Unexpected exception on attempt $attempt for ${metadata.title}: ${e.message}", e)
                     break
@@ -227,6 +229,10 @@ object LyricsSyncManager {
         val masterPath = getMasterFolderPath()
         val vaultManager = VaultManager(masterPath)
         val db = DatabaseProvider.getDatabase(context, masterPath)
+
+        // Clear the database completely to prevent duplicate entries and stale data
+        db.clearAllTables()
+
         val dao = db.libraryDao()
 
         val lyricsDatabaseDir = File(masterPath, "LyricsDatabase")
@@ -272,6 +278,8 @@ object LyricsSyncManager {
                     hasLyrics = hasLyrics
                 )
 
+                var activeLyricFile = json.optString("active_lyric_file").takeIf { it.isNotBlank() }
+
                 if (lyricsArray != null && lyricsArray.length() > 0) {
                     dao.deleteFilesForSong(songId)
                     for (i in 0 until lyricsArray.length()) {
@@ -279,6 +287,11 @@ object LyricsSyncManager {
                         val provider = lyricObj.optString("provider")
                         val type = lyricObj.optString("type")
                         val fileName = lyricObj.optString("file_name")
+                        
+                        if (activeLyricFile == null && fileName.isNotBlank()) {
+                            activeLyricFile = fileName
+                        }
+
                         if (provider.isNotBlank() && type.isNotBlank() && fileName.isNotBlank()) {
                             val relPath = "${vaultManager.sanitize(artist)}/${vaultManager.sanitize(album)}/${vaultManager.sanitize(title)}/$fileName"
                             dao.insertFile(
@@ -291,6 +304,18 @@ object LyricsSyncManager {
                             )
                         }
                     }
+                }
+
+                if (!videoId.isNullOrBlank()) {
+                    dao.insertOrUpdateSongIndex(
+                        SongIndexEntity(
+                            title = title,
+                            artist = artist,
+                            videoId = videoId,
+                            folderPath = metadataFile.parentFile?.absolutePath ?: "",
+                            activeLyricFile = activeLyricFile ?: ""
+                        )
+                    )
                 }
 
                 reindexedCount++
