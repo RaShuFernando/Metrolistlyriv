@@ -212,7 +212,7 @@ class ExternalPlaybackListenerService : NotificationListenerService() {
             .trim()
     }
 
-    private suspend fun handlePlaybackEvent(
+    private suspend fun CoroutineScope.handlePlaybackEvent(
         rawTitle: String,
         rawArtist: String,
         rawAlbum: String,
@@ -236,7 +236,10 @@ class ExternalPlaybackListenerService : NotificationListenerService() {
 
             // Secondary lookup: try without common trailing tags if initial match fails
             if (songIndex == null && songEntity == null) {
-                val simplifiedTitle = title.replace(Regex("""(?i)\s*[\(\[](?:official\s*(?:video|audio|music\s*video|lyric\s*video)?|feat\.?|ft\.?).*?[\)\]]"""), "").trim()
+                val simplifiedTitle = title.replace(
+                    Regex("""(?i)\s*[\(\[](?:official\s*(?:video|audio|music\s*video|lyric\s*video)?|feat\.?|ft\.?).*?[\)\]]"""),
+                    ""
+                ).trim()
                 if (simplifiedTitle.isNotEmpty() && simplifiedTitle != title) {
                     songIndex = dao.getSongIndexByTitleAndArtist(simplifiedTitle, artist)
                     songEntity = if (songIndex == null) dao.checkSongExists(simplifiedTitle, artist) else null
