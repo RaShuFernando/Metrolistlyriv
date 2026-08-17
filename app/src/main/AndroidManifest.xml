@@ -240,7 +240,7 @@
             android:theme="@style/Theme.Metrolist.Transparent" />
 
         <activity
-            android:name=".lyrics.share.ShareLyricsReceiverActivity"
+            android:name=".lyrics.vault.IsolatedShareReceiver"
             android:excludeFromRecents="true"
             android:exported="true"
             android:label="@string/download_lyrics_share_label"
