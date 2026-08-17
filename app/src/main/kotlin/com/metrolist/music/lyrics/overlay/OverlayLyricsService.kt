@@ -122,10 +122,46 @@ class OverlayLyricsService : Service() {
         private val _isPlaying = MutableStateFlow(false)
         val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
 
-        fun updatePlaybackState(videoId: String, positionMs: Long, playing: Boolean) {
+        private val _isExternalPlayback = MutableStateFlow(false)
+        val isExternalPlayback: StateFlow<Boolean> = _isExternalPlayback.asStateFlow()
+
+        fun updatePlaybackState(
+            videoId: String,
+            positionMs: Long,
+            playing: Boolean,
+            isExternal: Boolean = false
+        ) {
+            if (_isExternalPlayback.value && !isExternal) {
+                // If external playback is currently active and this is an internal idle update,
+                // ignore it to prevent resetting external lyrics or showing "No lyrics found"
+                if (playing && videoId.isNotBlank()) {
+                    // Internal player genuinely started playing a track, take over from external
+                    _isExternalPlayback.value = false
+                } else {
+                    return
+                }
+            }
+
+            if (isExternal) {
+                _isExternalPlayback.value = true
+            }
+
             _currentVideoId.value = videoId
             _currentPositionMs.value = positionMs
             _isPlaying.value = playing
+        }
+
+        fun updateExternalPlaybackState(videoId: String, positionMs: Long, playing: Boolean) {
+            updatePlaybackState(videoId, positionMs, playing, isExternal = true)
+        }
+
+        fun clearExternalPlayback() {
+            if (_isExternalPlayback.value) {
+                _isExternalPlayback.value = false
+                _currentVideoId.value = ""
+                _currentPositionMs.value = 0L
+                _isPlaying.value = false
+            }
         }
 
         fun start(context: Context) {
@@ -148,6 +184,7 @@ class OverlayLyricsService : Service() {
         }
 
         fun stop(context: Context) {
+            clearExternalPlayback()
             val intent = Intent(context, OverlayLyricsService::class.java)
             context.stopService(intent)
         }
