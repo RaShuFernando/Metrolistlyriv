@@ -45,11 +45,26 @@ class ExternalPlaybackListenerService : NotificationListenerService() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var playbackJob: Job? = null
+    private var isExternalEnabled = true
     private var mediaSessionManager: MediaSessionManager? = null
     private val activeControllers = ConcurrentHashMap<MediaController, MediaController.Callback>()
 
     private val sessionListener = MediaSessionManager.OnActiveSessionsChangedListener { controllers ->
         updateActiveSessions(controllers)
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        serviceScope.launch {
+            OverlayLyricsPreferences.getExternalOverlayEnabled(applicationContext).collect { enabled ->
+                isExternalEnabled = enabled
+                if (!enabled) {
+                    playbackJob?.cancel()
+                    playbackJob = null
+                    OverlayLyricsService.clearExternalPlayback()
+                }
+            }
+        }
     }
 
     override fun onListenerConnected() {
@@ -164,7 +179,7 @@ class ExternalPlaybackListenerService : NotificationListenerService() {
         metadata: MediaMetadata?,
         playbackState: PlaybackState?
     ) {
-        if (controller.packageName != TARGET_PACKAGE) {
+        if (controller.packageName != TARGET_PACKAGE || !isExternalEnabled) {
             return
         }
 

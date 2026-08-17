@@ -74,6 +74,7 @@ fun OverlayLyricsSettingsScreen(
     val coroutineScope = rememberCoroutineScope()
 
     val enabled by OverlayLyricsPreferences.getOverlayEnabled(context).collectAsState(initial = false)
+    val externalOverlayEnabled by OverlayLyricsPreferences.getExternalOverlayEnabled(context).collectAsState(initial = true)
     val fontSize by OverlayLyricsPreferences.getOverlayFontSize(context).collectAsState(initial = 18f)
     val showRomanized by OverlayLyricsPreferences.getShowRomanizedLyrics(context).collectAsState(initial = true)
     val showTranslated by OverlayLyricsPreferences.getShowTranslatedLyrics(context).collectAsState(initial = true)
@@ -191,6 +192,24 @@ fun OverlayLyricsSettingsScreen(
                                             OverlayLyricsService.start(context)
                                         } else {
                                             OverlayLyricsService.stop(context)
+                                        }
+                                    }
+                                }
+                            )
+                        }
+                    ),
+                    Material3SettingsItem(
+                        icon = painterResource(R.drawable.music_note),
+                        title = { Text(stringResource(R.string.external_overlay_lyrics_toggle)) },
+                        description = { Text(stringResource(R.string.external_overlay_lyrics_toggle_desc)) },
+                        trailingContent = {
+                            Switch(
+                                checked = externalOverlayEnabled,
+                                onCheckedChange = { newValue ->
+                                    coroutineScope.launch {
+                                        OverlayLyricsPreferences.setExternalOverlayEnabled(context, newValue)
+                                        if (!newValue) {
+                                            OverlayLyricsService.clearExternalPlayback()
                                         }
                                     }
                                 }

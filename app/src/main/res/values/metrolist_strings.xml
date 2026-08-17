@@ -1064,5 +1064,8 @@
     <string name="lyrics_downloaded_success">Lyrics saved for %s</string>
     <string name="lyrics_download_failed">Failed to download lyrics for %s</string>
     <string name="invalid_youtube_link">Invalid or unsupported YouTube link</string>
+
+    <string name="external_overlay_lyrics_toggle">External Music Lyrics</string>
+    <string name="external_overlay_lyrics_toggle_desc">Show overlay lyrics when playing music in external YouTube Music</string>
 </resources>
 

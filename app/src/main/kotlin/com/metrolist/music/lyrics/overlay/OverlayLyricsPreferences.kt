@@ -171,4 +171,18 @@ object OverlayLyricsPreferences {
             prefs[KEY_SHOW_TRANSLATED] = enabled
         }
     }
+
+    private val KEY_EXTERNAL_OVERLAY_ENABLED = booleanPreferencesKey("external_overlay_lyrics_enabled")
+
+    fun getExternalOverlayEnabled(context: Context): Flow<Boolean> {
+        return context.dataStore.data.map { prefs ->
+            prefs[KEY_EXTERNAL_OVERLAY_ENABLED] ?: true
+        }
+    }
+
+    suspend fun setExternalOverlayEnabled(context: Context, enabled: Boolean) {
+        context.safeDataStoreEdit { prefs ->
+            prefs[KEY_EXTERNAL_OVERLAY_ENABLED] = enabled
+        }
+    }
 }
