@@ -28,11 +28,13 @@ import java.util.concurrent.ConcurrentHashMap
  * queries the local vault database, and if a match is found, triggers the overlay module.
  *
  * Key Design & Robustness Features:
- * 1. Single-Job Debouncing: Cancels ongoing playback jobs before starting a new state handler.
- * 2. High-Precision Interpolated Ticker: Smoothly advances lyric timeline while media is playing.
- * 3. State Filtering: Accurately handles PLAYING, PAUSED, and STOPPED states without flickering.
- * 4. Vault Retrieval Normalization: Cleans title and artist artifacts for reliable matching.
- * 5. Strict Zero-Download Constraint: Only plays if lyrics exist locally in the vault.
+ * 1. Active State Expansion: Treats STATE_PLAYING, STATE_BUFFERING, and STATE_CONNECTING as active playback.
+ * 2. Instant Metadata Retry: Handles early empty/null metadata events via a non-blocking retry polling loop.
+ * 3. Single-Job Debouncing: Cancels ongoing playback jobs before starting a new state handler.
+ * 4. High-Precision Interpolated Ticker: Smoothly advances lyric timeline while media is playing.
+ * 5. State Filtering: Accurately handles PLAYING, PAUSED, and STOPPED states without flickering.
+ * 6. Vault Retrieval Normalization: Cleans title and artist artifacts for reliable matching.
+ * 7. Strict Zero-Download Constraint: Only plays if lyrics exist locally in the vault.
  */
 class ExternalPlaybackListenerService : NotificationListenerService() {
 
@@ -149,6 +151,14 @@ class ExternalPlaybackListenerService : NotificationListenerService() {
         activeControllers.clear()
     }
 
+    private fun isPlaybackActive(state: Int): Boolean {
+        return state == PlaybackState.STATE_PLAYING ||
+                state == PlaybackState.STATE_BUFFERING ||
+                state == PlaybackState.STATE_CONNECTING ||
+                state == PlaybackState.STATE_FAST_FORWARDING ||
+                state == PlaybackState.STATE_REWINDING
+    }
+
     private fun processMediaUpdate(
         controller: MediaController,
         metadata: MediaMetadata?,
@@ -161,16 +171,17 @@ class ExternalPlaybackListenerService : NotificationListenerService() {
         // Cancel previous coroutine job to prevent race conditions on rapid state toggles
         playbackJob?.cancel()
 
-        if (metadata == null || playbackState == null) {
+        if (playbackState == null) {
             OverlayLyricsService.updatePlaybackState("", 0L, false, isExternal = true)
             return
         }
 
         val state = playbackState.state
-        // Only process actively playing or paused states
-        val isValidState = state == PlaybackState.STATE_PLAYING || state == PlaybackState.STATE_PAUSED
-        if (!isValidState) {
-            // Stopped, buffering, or error: notify overlay that playback is paused/stopped without crashing
+        val isPlaying = isPlaybackActive(state)
+        val isPaused = state == PlaybackState.STATE_PAUSED
+
+        // If neither active nor paused (e.g. stopped, none, error), update overlay to inactive
+        if (!isPlaying && !isPaused) {
             OverlayLyricsService.updatePlaybackState(
                 videoId = OverlayLyricsService.currentVideoId.value,
                 positionMs = playbackState.position,
@@ -180,20 +191,33 @@ class ExternalPlaybackListenerService : NotificationListenerService() {
             return
         }
 
-        val rawTitle = metadata.getString(MediaMetadata.METADATA_KEY_TITLE)
-        val rawArtist = metadata.getString(MediaMetadata.METADATA_KEY_ARTIST)
-        val rawAlbum = metadata.getString(MediaMetadata.METADATA_KEY_ALBUM) ?: ""
-
-        if (rawTitle.isNullOrBlank() || rawArtist.isNullOrBlank()) {
-            return
-        }
-
-        val isPlaying = state == PlaybackState.STATE_PLAYING
         val basePositionMs = playbackState.position
         val lastUpdateTime = playbackState.lastPositionUpdateTime
         val speed = playbackState.playbackSpeed.takeIf { it > 0f } ?: 1.0f
 
         playbackJob = serviceScope.launch {
+            // Retrieve metadata, with retry mechanism if initially null or empty strings
+            var currentMetadata = metadata ?: controller.metadata
+            var rawTitle = currentMetadata?.getString(MediaMetadata.METADATA_KEY_TITLE)
+            var rawArtist = currentMetadata?.getString(MediaMetadata.METADATA_KEY_ARTIST)
+
+            var retries = 0
+            val maxRetries = 10 // 10 * 80ms = 800ms retry window for initial metadata publication
+            while ((rawTitle.isNullOrBlank() || rawArtist.isNullOrBlank()) && retries < maxRetries && isActive) {
+                delay(80L)
+                retries++
+                currentMetadata = controller.metadata
+                rawTitle = currentMetadata?.getString(MediaMetadata.METADATA_KEY_TITLE)
+                rawArtist = currentMetadata?.getString(MediaMetadata.METADATA_KEY_ARTIST)
+            }
+
+            if (rawTitle.isNullOrBlank() || rawArtist.isNullOrBlank()) {
+                // Metadata still unavailable after retries
+                return@launch
+            }
+
+            val rawAlbum = currentMetadata?.getString(MediaMetadata.METADATA_KEY_ALBUM) ?: ""
+
             handlePlaybackEvent(
                 rawTitle = rawTitle,
                 rawArtist = rawArtist,
