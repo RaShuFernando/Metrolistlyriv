@@ -1058,5 +1058,11 @@
     <string name="overlay_lyrics_active_word_color">Active Word Color</string>
     <string name="overlay_lyrics_active_line_color">Active Line Color</string>
     <string name="overlay_lyrics_inactive_line_color">Inactive Line Color</string>
+
+    <string name="download_lyrics_share_label">Download Lyrics</string>
+    <string name="downloading_lyrics">Downloading lyrics…</string>
+    <string name="lyrics_downloaded_success">Lyrics saved for %s</string>
+    <string name="lyrics_download_failed">Failed to download lyrics for %s</string>
+    <string name="invalid_youtube_link">Invalid or unsupported YouTube link</string>
 </resources>
 
