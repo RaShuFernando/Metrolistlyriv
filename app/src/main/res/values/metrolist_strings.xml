@@ -1067,5 +1067,12 @@
 
     <string name="external_overlay_lyrics_toggle">External Music Lyrics</string>
     <string name="external_overlay_lyrics_toggle_desc">Show overlay lyrics when playing music in external YouTube Music</string>
+    <string name="force_refresh_lyrics">Force Refresh Current Lyrics</string>
+    <string name="force_refresh_lyrics_desc">Re-check server and download fresh lyrics for currently playing song</string>
+    <string name="checking_for_lyrics">Checking for lyrics…</string>
+    <string name="lyrics_sync_success">Lyrics found and synced successfully</string>
+    <string name="lyrics_not_available">No lyrics available on server</string>
+    <string name="lyrics_refresh_cooldown">Please wait a few seconds before refreshing again</string>
+    <string name="lyrics_sync_in_progress">Lyrics sync already in progress</string>
 </resources>
 

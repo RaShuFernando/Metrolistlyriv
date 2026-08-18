@@ -49,6 +49,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.ui.draw.clip
 import com.metrolist.music.LocalPlayerAwareWindowInsets
+import com.metrolist.music.LocalPlayerConnection
+import com.metrolist.innertube.YouTube
 import com.metrolist.music.R
 import com.metrolist.music.lyrics.overlay.OverlayLyricsEngine
 import com.metrolist.music.lyrics.overlay.OverlayLyricsPreferences
@@ -57,6 +59,7 @@ import com.metrolist.music.lyrics.vault.DatabaseProvider
 import com.metrolist.music.lyrics.vault.LyricFileInfo
 import com.metrolist.music.lyrics.vault.LyricsSyncManager
 import com.metrolist.music.lyrics.vault.VaultManager
+import com.metrolist.music.lyrics.vault.VaultMetadata
 import com.metrolist.music.ui.component.Material3SettingsGroup
 import com.metrolist.music.ui.component.Material3SettingsItem
 import com.metrolist.music.ui.utils.ShowOffsetDialog
@@ -72,6 +75,7 @@ fun OverlayLyricsSettingsScreen(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    val playerConnection = LocalPlayerConnection.current
 
     val enabled by OverlayLyricsPreferences.getOverlayEnabled(context).collectAsState(initial = false)
     val externalOverlayEnabled by OverlayLyricsPreferences.getExternalOverlayEnabled(context).collectAsState(initial = true)
@@ -378,6 +382,100 @@ fun OverlayLyricsSettingsScreen(
                                         trackVaultDir = dir
                                         trackActiveFile = activeFile
                                         showOffsetDialogForTrack = true
+                                    }
+                                }
+                            }
+                        }
+                    ),
+                    Material3SettingsItem(
+                        icon = painterResource(R.drawable.refresh),
+                        title = { Text(stringResource(R.string.force_refresh_lyrics)) },
+                        description = { Text(stringResource(R.string.force_refresh_lyrics_desc)) },
+                        onClick = {
+                            val currentMediaMetadata = playerConnection?.service?.currentMediaMetadata?.value
+                                ?: playerConnection?.mediaMetadata?.value
+
+                            if (currentMediaMetadata == null || currentMediaMetadata.id.isBlank()) {
+                                Toast.makeText(context, context.getString(R.string.no_song_playing), Toast.LENGTH_SHORT).show()
+                                return@Material3SettingsItem
+                            }
+
+                            Toast.makeText(context, context.getString(R.string.checking_for_lyrics), Toast.LENGTH_SHORT).show()
+
+                            coroutineScope.launch(Dispatchers.IO) {
+                                val durationSeconds = if (currentMediaMetadata.duration > 0) {
+                                    currentMediaMetadata.duration
+                                } else {
+                                    val playerDuration = playerConnection?.player?.duration ?: -1L
+                                    if (playerDuration > 0) (playerDuration / 1000).toInt() else 0
+                                }
+
+                                val description = try {
+                                    YouTube.getMediaInfo(currentMediaMetadata.id).getOrNull()?.description ?: ""
+                                } catch (e: Exception) {
+                                    ""
+                                }
+
+                                val vaultMetadata = VaultMetadata(
+                                    videoId = currentMediaMetadata.id,
+                                    title = currentMediaMetadata.title,
+                                    artist = currentMediaMetadata.artists.joinToString(", ") { it.name },
+                                    album = currentMediaMetadata.album?.title ?: "",
+                                    durationSeconds = durationSeconds,
+                                    albumArtUrl = currentMediaMetadata.thumbnailUrl ?: "",
+                                    composer = "",
+                                    description = description,
+                                    mediaId = currentMediaMetadata.id,
+                                    releaseYear = null,
+                                    trackNumber = null,
+                                    artistBrowseId = currentMediaMetadata.artists.firstOrNull()?.id,
+                                    albumBrowseId = currentMediaMetadata.album?.id,
+                                    isExplicit = currentMediaMetadata.explicit
+                                )
+
+                                val result = LyricsSyncManager.syncLyrics(
+                                    context = context.applicationContext,
+                                    metadata = vaultMetadata,
+                                    isManualForce = true
+                                )
+
+                                val masterPath = LyricsSyncManager.getMasterFolderPath()
+                                val dao = DatabaseProvider.getDatabase(context, masterPath).libraryDao()
+                                val index = dao.getSongIndexByVideoId(currentMediaMetadata.id)
+                                val dir = index?.let { File(it.folderPath) }
+                                val updatedMetadata = if (dir != null && dir.exists()) {
+                                    val vaultManager = VaultManager(masterPath)
+                                    vaultManager.readMetadataJson(dir)
+                                } else null
+
+                                withContext(Dispatchers.Main) {
+                                    if (index != null && dir != null && dir.exists()) {
+                                        parsedVaultDir = dir
+                                        activeFilename = index.activeLyricFile
+                                        availableVersions = updatedMetadata?.lyrics ?: emptyList()
+                                    }
+
+                                    when (result) {
+                                        LyricsSyncManager.SyncResult.SUCCESS -> {
+                                            Toast.makeText(context, context.getString(R.string.lyrics_sync_success), Toast.LENGTH_SHORT).show()
+                                        }
+                                        LyricsSyncManager.SyncResult.NO_LYRICS_FOUND -> {
+                                            Toast.makeText(context, context.getString(R.string.lyrics_not_available), Toast.LENGTH_SHORT).show()
+                                        }
+                                        LyricsSyncManager.SyncResult.DEBOUNCED -> {
+                                            Toast.makeText(context, context.getString(R.string.lyrics_refresh_cooldown), Toast.LENGTH_SHORT).show()
+                                        }
+                                        LyricsSyncManager.SyncResult.ALREADY_SYNCING -> {
+                                            Toast.makeText(context, context.getString(R.string.lyrics_sync_in_progress), Toast.LENGTH_SHORT).show()
+                                        }
+                                        LyricsSyncManager.SyncResult.ALL_FORMATS_PRESENT -> {
+                                            Toast.makeText(context, context.getString(R.string.lyrics_sync_success), Toast.LENGTH_SHORT).show()
+                                        }
+                                        LyricsSyncManager.SyncResult.FAILED,
+                                        LyricsSyncManager.SyncResult.COOLDOWN_ACTIVE,
+                                        LyricsSyncManager.SyncResult.RETRY_LIMIT_REACHED -> {
+                                            Toast.makeText(context, context.getString(R.string.lyrics_download_failed, currentMediaMetadata.title), Toast.LENGTH_SHORT).show()
+                                        }
                                     }
                                 }
                             }
