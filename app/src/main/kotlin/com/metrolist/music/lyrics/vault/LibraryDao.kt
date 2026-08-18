@@ -60,8 +60,35 @@ interface LibraryDao {
     """)
     suspend fun checkSongExistsFast(title: String, artist: String): Boolean
 
-    @Query("UPDATE songs SET lastCheckedAt = :timestamp, hasLyricsAvailable = :hasLyrics WHERE id = :songId")
-    suspend fun updateSongCheckStatus(songId: Int, timestamp: Long, hasLyrics: Boolean)
+    @Query("""
+        UPDATE songs 
+        SET lastCheckedAt = :timestamp, 
+            hasLyricsAvailable = :hasLyrics,
+            retry_count = :retryCount,
+            all_formats_present = :allFormatsPresent
+        WHERE id = :songId
+    """)
+    suspend fun updateSongCheckStatus(
+        songId: Int,
+        timestamp: Long,
+        hasLyrics: Boolean,
+        retryCount: Int = 0,
+        allFormatsPresent: Boolean = false
+    )
+
+    @Query("""
+        UPDATE songs 
+        SET retry_count = :retryCount, 
+            all_formats_present = :allFormatsPresent, 
+            lastCheckedAt = :timestamp 
+        WHERE id = :songId
+    """)
+    suspend fun updateSongRetryAndFormats(
+        songId: Int,
+        retryCount: Int,
+        allFormatsPresent: Boolean,
+        timestamp: Long = System.currentTimeMillis()
+    )
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertOrUpdateSongIndex(songIndex: SongIndexEntity): Long
@@ -75,10 +102,12 @@ interface LibraryDao {
     @Query("SELECT * FROM song_index WHERE title = :title AND artist = :artist LIMIT 1")
     suspend fun getSongIndexByTitleAndArtist(title: String, artist: String): SongIndexEntity?
 
-
+    @Query("UPDATE song_index SET retry_count = :retryCount, all_formats_present = :allFormatsPresent WHERE videoId = :videoId")
+    suspend fun updateSongIndexStatus(videoId: String, retryCount: Int, allFormatsPresent: Boolean)
 
     @Query("UPDATE song_index SET activeLyricFile = :activeLyricFile WHERE videoId = :videoId")
     suspend fun updateActiveLyricFile(videoId: String, activeLyricFile: String)
+
 
     @Transaction
     suspend fun insertFullSongData(artist: ArtistEntity, album: AlbumEntity, song: SongEntity, file: FileEntity) {

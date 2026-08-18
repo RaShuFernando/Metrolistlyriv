@@ -25,5 +25,8 @@ data class LyricMetadata(
     val active_lyric_file: String? = null,
     val lyrics: List<LyricFileInfo> = emptyList(),
     val last_checked: Long = 0L,
-    val last_updated: Long = 0L
+    val last_updated: Long = 0L,
+    val retry_count: Int = 0,
+    val all_formats_present: Boolean = false
 )
+

@@ -59,19 +59,58 @@ object LyricsSyncManager {
             val db = DatabaseProvider.getDatabase(context, masterPath)
             val dao = db.libraryDao()
 
-            // Step a) Local Room DB Cache Check
-            val existingSong = dao.getSongByVideoId(metadata.videoId)
+            // Step 1: Pre-Fetch Validation (Cooldown & Stop Conditions)
+            val parsedVaultDir = vaultManager.getSongParsedVaultDir(metadata.artist, metadata.album, metadata.title)
+            val localMeta = vaultManager.readMetadataJson(parsedVaultDir)
+            val existingSong = (if (metadata.videoId.isNotBlank()) dao.getSongByVideoId(metadata.videoId) else null)
                 ?: dao.checkSongExists(metadata.title, metadata.artist)
 
-            if (existingSong != null && existingSong.hasLyricsAvailable && existingSong.lastCheckedAt > 0) {
-                val dayInMs = 24 * 60 * 60 * 1000L
-                if (System.currentTimeMillis() - existingSong.lastCheckedAt < dayInMs) {
-                    FileLogger.d(TAG, "Lyrics already cached locally for song: ${metadata.title}")
-                    return@withContext
+            val targetFormats = setOf("lrc", "qrc", "ttml", "elrc")
+            val existingFormatsOnDisk = parsedVaultDir.listFiles()?.mapNotNull { file ->
+                val ext = file.extension.lowercase()
+                if (ext in targetFormats && file.length() > 0) ext else null
+            }?.toSet() ?: emptySet()
+
+            val allFormatsPresentOnDisk = targetFormats.all { it in existingFormatsOnDisk }
+
+            // 1a. If all four formats exist locally, set all_formats_present = true and abort fetch
+            if (allFormatsPresentOnDisk || localMeta?.all_formats_present == true || existingSong?.all_formats_present == true) {
+                if (localMeta != null && !localMeta.all_formats_present) {
+                    vaultManager.updateMetadataAllFormatsPresent(parsedVaultDir, true)
                 }
+                if (existingSong != null && !existingSong.all_formats_present) {
+                    dao.updateSongRetryAndFormats(
+                        songId = existingSong.id,
+                        retryCount = existingSong.retry_count,
+                        allFormatsPresent = true,
+                        timestamp = existingSong.lastCheckedAt
+                    )
+                }
+                FileLogger.d(TAG, "All 4 target lyric formats (.lrc, .qrc, .ttml, .elrc) exist locally for: ${metadata.title}. Aborting fetch.")
+                return@withContext
             }
 
-            // Step b) Turnstile Authentication & SSE Stream Download (with Retry Mechanism)
+            // 1b. If retry_count >= 6, abort the fetch (max 6 months of checking)
+            val currentRetryCount = localMeta?.retry_count ?: existingSong?.retry_count ?: 0
+            if (currentRetryCount >= 6) {
+                FileLogger.d(TAG, "Retry limit reached (retry_count=$currentRetryCount >= 6) for: ${metadata.title}. Aborting fetch.")
+                return@withContext
+            }
+
+            // 1c. Time since last_checked: abort if less than 30 days
+            val lastChecked = when {
+                localMeta != null && localMeta.last_checked > 0 -> localMeta.last_checked
+                existingSong != null && existingSong.lastCheckedAt > 0 -> existingSong.lastCheckedAt
+                else -> 0L
+            }
+            val THIRTY_DAYS_MS = 30L * 24 * 60 * 60 * 1000L
+            if (lastChecked > 0 && (System.currentTimeMillis() - lastChecked) < THIRTY_DAYS_MS) {
+                val daysAgo = (System.currentTimeMillis() - lastChecked) / (1000 * 60 * 60 * 24)
+                FileLogger.d(TAG, "Lyrics checked $daysAgo days ago (< 30 days) for: ${metadata.title}. Aborting fetch.")
+                return@withContext
+            }
+
+            // Step 2: Turnstile Authentication & SSE Stream Download (with Retry Mechanism)
             val authenticator = TurnstileAuthenticator(context)
             var jwtToken: String? = null
             var tempFile: File? = null
@@ -127,64 +166,144 @@ object LyricsSyncManager {
                 return@withContext
             }
 
-            // Step c) Version raw SSE via VaultManager
-            val sseFile = vaultManager.processNewSseFile(tempFile, metadata.artist, metadata.album, metadata.title)
-            val parsedVaultDir = vaultManager.getSongParsedVaultDir(metadata.artist, metadata.album, metadata.title)
+            // Step 3: SSE Parsing & Smart Hashing
+            val parser = SseParser()
+            val parsedLyricsList = parser.parse(tempFile)
+            val now = System.currentTimeMillis()
 
-            // SQLite Foreign Key crash prevention using ensure methods
             val artistId = ensureArtist(dao, metadata.artist, metadata.artistBrowseId)
             val albumName = metadata.album.ifBlank { "Unknown Album" }
             val albumId = ensureAlbum(dao, albumName, metadata.albumBrowseId, artistId)
 
-            if (sseFile == null) {
-                // Duplicate SSE hash detected: processNewSseFile already updated last_checked in metadata.json & changelog.json
-                FileLogger.d(TAG, "Duplicate SSE stream detected for: ${metadata.title}. Updated last_checked.")
-                
-                // Keep Room DB lastCheckedAt up-to-date
-                val songInDb = dao.getSongByVideoId(metadata.videoId)
-                    ?: dao.getSongByTitleAndAlbum(metadata.title, albumId)
-                if (songInDb != null) {
-                    dao.updateSongCheckStatus(songInDb.id, System.currentTimeMillis(), songInDb.hasLyricsAvailable)
-                } else {
-                    ensureSong(dao, metadata.title, metadata.videoId, albumId, metadata.durationSeconds, false)
+            // 3a. Empty Check: Discard temp .sse, increment retry_count, update last_checked, wait 30 days
+            if (parsedLyricsList.isEmpty()) {
+                FileLogger.d(TAG, "Parsed lyrics list is empty for: ${metadata.title}. Discarding temp SSE and incrementing retry_count.")
+                tempFile.delete()
+                val nextRetry = currentRetryCount + 1
+
+                vaultManager.updateMetadataRetryAndCheck(
+                    parsedVaultDir = parsedVaultDir,
+                    retryCount = nextRetry,
+                    timestamp = now,
+                    allFormatsPresent = false,
+                    metadata = metadata
+                )
+
+                val songId = ensureSong(
+                    dao = dao,
+                    title = metadata.title,
+                    videoId = metadata.videoId,
+                    albumId = albumId,
+                    durationSeconds = metadata.durationSeconds,
+                    hasLyrics = false,
+                    retryCount = nextRetry,
+                    allFormatsPresent = false
+                )
+
+                dao.updateSongRetryAndFormats(
+                    songId = songId,
+                    retryCount = nextRetry,
+                    allFormatsPresent = false,
+                    timestamp = now
+                )
+
+                if (metadata.videoId.isNotBlank()) {
+                    dao.updateSongIndexStatus(metadata.videoId, nextRetry, false)
                 }
+
                 return@withContext
             }
 
-            // Step d) Parse new SSE file, save formatted lyrics & metadata.json
-            val parsedLyricsList = if (sseFile.exists()) {
-                val parser = SseParser()
-                parser.parse(sseFile)
-            } else {
-                emptyList()
+            // 3b. Content Hash: SHA-256 hash comparison against existing local lyric files
+            val newContentHash = vaultManager.calculateLyricsTextHash(parsedLyricsList)
+            val localContentHash = vaultManager.calculateLocalLyricsHash(parsedVaultDir, localMeta)
+
+            if (localContentHash != null && localContentHash == newContentHash) {
+                FileLogger.d(TAG, "Lyrics content hash unchanged for: ${metadata.title}. Discarding temp SSE and incrementing retry_count.")
+                tempFile.delete()
+                val nextRetry = currentRetryCount + 1
+
+                vaultManager.updateMetadataRetryAndCheck(
+                    parsedVaultDir = parsedVaultDir,
+                    retryCount = nextRetry,
+                    timestamp = now,
+                    allFormatsPresent = localMeta?.all_formats_present ?: false,
+                    metadata = metadata
+                )
+
+                val songInDb = (if (metadata.videoId.isNotBlank()) dao.getSongByVideoId(metadata.videoId) else null)
+                    ?: dao.getSongByTitleAndAlbum(metadata.title, albumId)
+                if (songInDb != null) {
+                    dao.updateSongRetryAndFormats(
+                        songId = songInDb.id,
+                        retryCount = nextRetry,
+                        allFormatsPresent = songInDb.all_formats_present,
+                        timestamp = now
+                    )
+                }
+
+                if (metadata.videoId.isNotBlank()) {
+                    dao.updateSongIndexStatus(metadata.videoId, nextRetry, localMeta?.all_formats_present ?: false)
+                }
+
+                return@withContext
             }
 
-            // Save formatted lyric files
+            // Step 4: Saving and Rotating Files
+            // 4a. Delete old extracted lyric files
+            parsedVaultDir.listFiles()?.filter { file ->
+                file.extension.lowercase() in targetFormats
+            }?.forEach { it.delete() }
+
+            // 4b. Save newly extracted lyric files
             parsedLyricsList.forEach { lyric ->
                 val fileName = "${vaultManager.sanitize(metadata.title)}_${vaultManager.sanitize(lyric.provider)}_${vaultManager.sanitize(lyric.type)}.${lyric.format.lowercase()}"
                 val lyricFile = File(parsedVaultDir, fileName)
                 lyricFile.writeText(lyric.lyricsText)
             }
 
-            // Write metadata.json with ranking & get highest ranked activeLyricFile
-            val now = System.currentTimeMillis()
+            // 4c. Save raw .sse file with version suffix and FIFO queue (max 4 .sse files)
+            vaultManager.saveRawSseWithFifoRotation(
+                tempFile = tempFile,
+                artist = metadata.artist,
+                album = metadata.album,
+                song = metadata.title,
+                maxFiles = 4
+            )
+
+            // 4d. Determine if all 4 formats (.lrc, .qrc, .ttml, .elrc) are present
+            val presentFormats = parsedLyricsList.map { it.format.lowercase() }.toSet()
+            val allFormatsPresent = targetFormats.all { it in presentFormats }
+
+            // 4e. Write metadata.json with ranking, reset retry_count to 0, update last_updated & last_checked
             val activeLyricFile = vaultManager.writeMetadataJsonWithRanking(
                 parsedVaultDir = parsedVaultDir,
                 metadata = metadata,
                 parsedLyricsList = parsedLyricsList,
                 lastChecked = now,
-                lastUpdated = now
+                lastUpdated = now,
+                retryCount = 0,
+                allFormatsPresent = allFormatsPresent
             )
 
-            // Room Database lightweight index update
-            val hasLyrics = parsedLyricsList.isNotEmpty()
+            // 4f. Update Room DB
             val songId = ensureSong(
                 dao = dao,
                 title = metadata.title,
                 videoId = metadata.videoId,
                 albumId = albumId,
                 durationSeconds = metadata.durationSeconds,
-                hasLyrics = hasLyrics
+                hasLyrics = true,
+                retryCount = 0,
+                allFormatsPresent = allFormatsPresent
+            )
+
+            dao.updateSongCheckStatus(
+                songId = songId,
+                timestamp = now,
+                hasLyrics = true,
+                retryCount = 0,
+                allFormatsPresent = allFormatsPresent
             )
 
             if (activeLyricFile != null) {
@@ -194,25 +313,25 @@ object LyricsSyncManager {
                         artist = metadata.artist,
                         videoId = metadata.videoId,
                         folderPath = parsedVaultDir.absolutePath,
-                        activeLyricFile = activeLyricFile
+                        activeLyricFile = activeLyricFile,
+                        retry_count = 0,
+                        all_formats_present = allFormatsPresent
                     )
                 )
             }
 
-            if (parsedLyricsList.isNotEmpty()) {
-                dao.deleteFilesForSong(songId)
-                parsedLyricsList.forEach { lyric ->
-                    val fileName = "${vaultManager.sanitize(metadata.title)}_${vaultManager.sanitize(lyric.provider)}_${vaultManager.sanitize(lyric.type)}.${lyric.format.lowercase()}"
-                    val relPath = "${vaultManager.sanitize(metadata.artist)}/${vaultManager.sanitize(metadata.album)}/${vaultManager.sanitize(metadata.title)}/$fileName"
-                    dao.insertFile(
-                        FileEntity(
-                            songId = songId,
-                            providerName = lyric.provider,
-                            syncLevel = lyric.type,
-                            relativePath = relPath
-                        )
+            dao.deleteFilesForSong(songId)
+            parsedLyricsList.forEach { lyric ->
+                val fileName = "${vaultManager.sanitize(metadata.title)}_${vaultManager.sanitize(lyric.provider)}_${vaultManager.sanitize(lyric.type)}.${lyric.format.lowercase()}"
+                val relPath = "${vaultManager.sanitize(metadata.artist)}/${vaultManager.sanitize(metadata.album)}/${vaultManager.sanitize(metadata.title)}/$fileName"
+                dao.insertFile(
+                    FileEntity(
+                        songId = songId,
+                        providerName = lyric.provider,
+                        syncLevel = lyric.type,
+                        relativePath = relPath
                     )
-                }
+                )
             }
 
             FileLogger.d(TAG, "Successfully archived lyrics and metadata for: ${metadata.title}")
@@ -259,6 +378,8 @@ object LyricsSyncManager {
                 val durationSeconds = json.optInt("durationSeconds", 0)
                 val artistBrowseId = json.optString("artistBrowseId").takeIf { it.isNotBlank() }
                 val albumBrowseId = json.optString("albumBrowseId").takeIf { it.isNotBlank() }
+                val retryCount = json.optInt("retry_count", 0)
+                val allFormatsPresent = json.optBoolean("all_formats_present", false)
 
                 if (title.isBlank() || artist.isBlank()) continue
 
@@ -275,7 +396,9 @@ object LyricsSyncManager {
                     videoId = videoId,
                     albumId = albumId,
                     durationSeconds = durationSeconds,
-                    hasLyrics = hasLyrics
+                    hasLyrics = hasLyrics,
+                    retryCount = retryCount,
+                    allFormatsPresent = allFormatsPresent
                 )
 
                 var activeLyricFile = json.optString("active_lyric_file").takeIf { it.isNotBlank() }
@@ -313,7 +436,9 @@ object LyricsSyncManager {
                             artist = artist,
                             videoId = videoId,
                             folderPath = metadataFile.parentFile?.absolutePath ?: "",
-                            activeLyricFile = activeLyricFile ?: ""
+                            activeLyricFile = activeLyricFile ?: "",
+                            retry_count = retryCount,
+                            all_formats_present = allFormatsPresent
                         )
                     )
                 }
@@ -362,13 +487,21 @@ object LyricsSyncManager {
         videoId: String?,
         albumId: Int,
         durationSeconds: Int,
-        hasLyrics: Boolean
+        hasLyrics: Boolean,
+        retryCount: Int = 0,
+        allFormatsPresent: Boolean = false
     ): Int {
         val existingSong = (if (!videoId.isNullOrEmpty()) dao.getSongByVideoId(videoId) else null)
             ?: dao.getSongByTitleAndAlbum(title, albumId)
 
         if (existingSong != null) {
-            dao.updateSongCheckStatus(existingSong.id, System.currentTimeMillis(), hasLyrics)
+            dao.updateSongCheckStatus(
+                songId = existingSong.id,
+                timestamp = System.currentTimeMillis(),
+                hasLyrics = hasLyrics,
+                retryCount = retryCount,
+                allFormatsPresent = allFormatsPresent
+            )
             return existingSong.id
         }
 
@@ -379,7 +512,9 @@ object LyricsSyncManager {
                 youtubeVideoId = videoId,
                 albumId = albumId,
                 hasLyricsAvailable = hasLyrics,
-                lastCheckedAt = System.currentTimeMillis()
+                lastCheckedAt = System.currentTimeMillis(),
+                retry_count = retryCount,
+                all_formats_present = allFormatsPresent
             )
         ).toInt()
 
@@ -389,11 +524,18 @@ object LyricsSyncManager {
             ?: dao.getSongByTitleAndAlbum(title, albumId)
 
         if (requeriedSong != null) {
-            dao.updateSongCheckStatus(requeriedSong.id, System.currentTimeMillis(), hasLyrics)
+            dao.updateSongCheckStatus(
+                songId = requeriedSong.id,
+                timestamp = System.currentTimeMillis(),
+                hasLyrics = hasLyrics,
+                retryCount = retryCount,
+                allFormatsPresent = allFormatsPresent
+            )
             return requeriedSong.id
         }
 
         error("Failed to ensure song for: $title")
     }
 }
+
 

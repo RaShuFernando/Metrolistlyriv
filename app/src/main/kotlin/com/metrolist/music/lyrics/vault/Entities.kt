@@ -57,7 +57,9 @@ data class SongEntity(
     val youtubeVideoId: String?,
     val albumId: Int,
     val hasLyricsAvailable: Boolean,
-    val lastCheckedAt: Long = 0L
+    val lastCheckedAt: Long = 0L,
+    val retry_count: Int = 0,
+    val all_formats_present: Boolean = false
 )
 
 @Entity(
@@ -90,6 +92,9 @@ data class SongIndexEntity(
     val artist: String,
     val videoId: String,
     val folderPath: String,
-    val activeLyricFile: String
+    val activeLyricFile: String,
+    val retry_count: Int = 0,
+    val all_formats_present: Boolean = false
 )
+
 

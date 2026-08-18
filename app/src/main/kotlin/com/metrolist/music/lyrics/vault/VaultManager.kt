@@ -45,6 +45,7 @@ class VaultManager(private val masterFolderPath: String) {
             ignoreUnknownKeys = true
             prettyPrint = true
             encodeDefaults = true
+            coerceInputValues = true
         }
     }
 
@@ -90,6 +91,40 @@ class VaultManager(private val masterFolderPath: String) {
         return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
+    fun calculateSha256(text: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        val bytes = digest.digest(text.toByteArray(Charsets.UTF_8))
+        return bytes.joinToString("") { "%02x".format(it) }
+    }
+
+    fun calculateLyricsTextHash(parsedLyrics: List<ParsedLyrics>): String {
+        val concatenated = parsedLyrics
+            .sortedWith(compareBy({ it.provider }, { it.type }, { it.format }))
+            .joinToString("\n---LYRIC_DELIMITER---\n") { it.lyricsText.trim() }
+        return calculateSha256(concatenated)
+    }
+
+    fun calculateLocalLyricsHash(parsedVaultDir: File, localMeta: LyricMetadata?): String? {
+        val targetFormats = setOf("lrc", "qrc", "ttml", "elrc")
+        if (localMeta == null || localMeta.lyrics.isEmpty()) {
+            val lyricFiles = parsedVaultDir.listFiles()?.filter { file ->
+                file.extension.lowercase() in targetFormats
+            }?.sortedBy { it.name } ?: emptyList()
+
+            if (lyricFiles.isEmpty()) return null
+            val concatenated = lyricFiles.joinToString("\n---LYRIC_DELIMITER---\n") { it.readText().trim() }
+            return calculateSha256(concatenated)
+        }
+
+        val sortedLyrics = localMeta.lyrics.sortedWith(compareBy({ it.provider }, { it.type }, { it.format }))
+        val texts = sortedLyrics.mapNotNull { info ->
+            val file = File(parsedVaultDir, info.filename)
+            if (file.exists()) file.readText().trim() else null
+        }
+        if (texts.isEmpty()) return null
+        return calculateSha256(texts.joinToString("\n---LYRIC_DELIMITER---\n"))
+    }
+
     fun updateMetadataLastCheckedOnly(parsedVaultDir: File, timestamp: Long = System.currentTimeMillis()) {
         val metadataFile = File(parsedVaultDir, "metadata.json")
         if (metadataFile.exists()) {
@@ -103,6 +138,130 @@ class VaultManager(private val masterFolderPath: String) {
                 FileLogger.e("VaultManager", "Failed to update last_checked in metadata.json", e)
             }
         }
+    }
+
+    fun updateMetadataRetryAndCheck(
+        parsedVaultDir: File,
+        retryCount: Int,
+        timestamp: Long = System.currentTimeMillis(),
+        allFormatsPresent: Boolean = false,
+        metadata: VaultMetadata? = null
+    ) {
+        val metadataFile = File(parsedVaultDir, "metadata.json")
+        if (metadataFile.exists()) {
+            try {
+                val content = metadataFile.readText()
+                val existing = jsonSerializer.decodeFromString(LyricMetadata.serializer(), content)
+                val updated = existing.copy(
+                    last_checked = timestamp,
+                    retry_count = retryCount,
+                    all_formats_present = allFormatsPresent
+                )
+                metadataFile.writeText(jsonSerializer.encodeToString(LyricMetadata.serializer(), updated))
+            } catch (e: Exception) {
+                FileLogger.e("VaultManager", "Failed to update retry & check in metadata.json", e)
+            }
+        } else if (metadata != null) {
+            try {
+                val newMeta = LyricMetadata(
+                    videoId = metadata.videoId,
+                    title = metadata.title,
+                    artist = metadata.artist,
+                    album = metadata.album,
+                    durationSeconds = metadata.durationSeconds,
+                    albumArtUrl = metadata.albumArtUrl,
+                    yt_description = metadata.description,
+                    last_checked = timestamp,
+                    last_updated = timestamp,
+                    retry_count = retryCount,
+                    all_formats_present = allFormatsPresent
+                )
+                metadataFile.writeText(jsonSerializer.encodeToString(LyricMetadata.serializer(), newMeta))
+            } catch (e: Exception) {
+                FileLogger.e("VaultManager", "Failed to create baseline metadata.json on retry", e)
+            }
+        }
+    }
+
+    fun updateMetadataAllFormatsPresent(parsedVaultDir: File, allFormatsPresent: Boolean) {
+        val metadataFile = File(parsedVaultDir, "metadata.json")
+        if (metadataFile.exists()) {
+            try {
+                val content = metadataFile.readText()
+                val existing = jsonSerializer.decodeFromString(LyricMetadata.serializer(), content)
+                val updated = existing.copy(all_formats_present = allFormatsPresent)
+                metadataFile.writeText(jsonSerializer.encodeToString(LyricMetadata.serializer(), updated))
+            } catch (e: Exception) {
+                FileLogger.e("VaultManager", "Failed to update all_formats_present in metadata.json", e)
+            }
+        }
+    }
+
+    private fun extractVersionNumber(filename: String): Int? {
+        val regex = Regex("""_raw_v(\d+)\.sse$""", RegexOption.IGNORE_CASE)
+        val match = regex.find(filename) ?: return null
+        return match.groupValues[1].toIntOrNull()
+    }
+
+    fun saveRawSseWithFifoRotation(
+        tempFile: File,
+        artist: String,
+        album: String,
+        song: String,
+        maxFiles: Int = 4
+    ): File {
+        val vaultDir = getSongRawVaultDir(artist, album, song)
+        val changelogFile = File(vaultDir, "${sanitize(song)}_changelog.json")
+        val fileHash = calculateSha256(tempFile)
+        val now = System.currentTimeMillis()
+
+        val changelog = if (changelogFile.exists()) {
+            try {
+                jsonSerializer.decodeFromString(Changelog.serializer(), changelogFile.readText())
+            } catch (e: Exception) {
+                Changelog()
+            }
+        } else {
+            Changelog()
+        }
+
+        val existingSseFiles = vaultDir.listFiles { _, name -> name.endsWith(".sse") }?.toList() ?: emptyList()
+        val maxExtractedVersion = existingSseFiles.mapNotNull { extractVersionNumber(it.name) }.maxOrNull() ?: 0
+        val newVersionNum = maxOf(changelog.latest_version, maxExtractedVersion) + 1
+
+        val newFileName = "${sanitize(song)}_raw_v${newVersionNum}.sse"
+        val destinationFile = File(vaultDir, newFileName)
+        tempFile.copyTo(destinationFile, overwrite = true)
+        tempFile.delete()
+
+        val updatedChangelog = Changelog(
+            latest_version = newVersionNum,
+            active_version_hash = fileHash,
+            last_updated = now,
+            last_checked = now
+        )
+        try {
+            changelogFile.writeText(jsonSerializer.encodeToString(Changelog.serializer(), updatedChangelog))
+        } catch (e: Exception) {
+            FileLogger.e("VaultManager", "Failed to write changelog.json", e)
+        }
+
+        // FIFO queue rotation: keep at most maxFiles (4) .sse files per song
+        val allSseFiles = vaultDir.listFiles { _, name -> name.endsWith(".sse") }?.toList() ?: emptyList()
+        if (allSseFiles.size > maxFiles) {
+            val sortedFiles = allSseFiles.sortedWith(
+                compareBy<File> { extractVersionNumber(it.name) ?: 0 }
+                    .thenBy { it.lastModified() }
+            )
+            val excessCount = sortedFiles.size - maxFiles
+            val filesToDelete = sortedFiles.take(excessCount)
+            for (file in filesToDelete) {
+                file.delete()
+                FileLogger.d("VaultManager", "FIFO rotation deleted oldest SSE version: ${file.name}")
+            }
+        }
+
+        return destinationFile
     }
 
     fun processNewSseFile(tempFile: File, artist: String, album: String, song: String): File? {
@@ -131,39 +290,18 @@ class VaultManager(private val masterFolderPath: String) {
             }
         }
 
-        // It's a new version
-        var newVersionNum = 1
-        if (changelogFile.exists()) {
-            val changelog = try {
-                jsonSerializer.decodeFromString(Changelog.serializer(), changelogFile.readText())
-            } catch (e: Exception) {
-                Changelog()
-            }
-            newVersionNum = changelog.latest_version + 1
-        }
-        
-        val newFileName = "${sanitize(song)}_raw_v${newVersionNum}.sse"
-        val destinationFile = File(vaultDir, newFileName)
-        tempFile.copyTo(destinationFile, overwrite = true)
-        tempFile.delete()
-
-        val newChangelog = Changelog(
-            latest_version = newVersionNum,
-            active_version_hash = fileHash,
-            last_updated = now,
-            last_checked = now
-        )
-        changelogFile.writeText(jsonSerializer.encodeToString(Changelog.serializer(), newChangelog))
-        
-        return destinationFile
+        return saveRawSseWithFifoRotation(tempFile, artist, album, song, maxFiles = 4)
     }
+
 
     suspend fun writeMetadataJsonWithRanking(
         parsedVaultDir: File,
         metadata: VaultMetadata,
         parsedLyricsList: List<ParsedLyrics> = emptyList(),
         lastChecked: Long = System.currentTimeMillis(),
-        lastUpdated: Long = System.currentTimeMillis()
+        lastUpdated: Long = System.currentTimeMillis(),
+        retryCount: Int = 0,
+        allFormatsPresent: Boolean = false
     ): String? = withContext(Dispatchers.IO) {
         val key = metadata.videoId.takeIf { it.isNotBlank() } ?: "${metadata.artist}_${metadata.title}"
         metadataMutexMap.getOrPut(key) { Mutex() }.withLock {
@@ -189,7 +327,9 @@ class VaultManager(private val masterFolderPath: String) {
                 yt_description = metadata.description,
                 lyrics = lyricFileInfos,
                 last_checked = lastChecked,
-                last_updated = lastUpdated
+                last_updated = lastUpdated,
+                retry_count = retryCount,
+                all_formats_present = allFormatsPresent
             )
 
             val metadataFile = File(parsedVaultDir, "metadata.json")
@@ -289,7 +429,9 @@ class VaultManager(private val masterFolderPath: String) {
         metadata: VaultMetadata,
         parsedLyricsList: List<ParsedLyrics> = emptyList(),
         lastChecked: Long = System.currentTimeMillis(),
-        lastUpdated: Long = System.currentTimeMillis()
+        lastUpdated: Long = System.currentTimeMillis(),
+        retryCount: Int = 0,
+        allFormatsPresent: Boolean = false
     ) {
         val lyricFileInfos = parsedLyricsList.map { lyric ->
             val fileName = "${sanitize(metadata.title)}_${sanitize(lyric.provider)}_${sanitize(lyric.type)}.${lyric.format.lowercase()}"
@@ -312,13 +454,16 @@ class VaultManager(private val masterFolderPath: String) {
             yt_description = metadata.description,
             lyrics = lyricFileInfos,
             last_checked = lastChecked,
-            last_updated = lastUpdated
+            last_updated = lastUpdated,
+            retry_count = retryCount,
+            all_formats_present = allFormatsPresent
         )
 
         val metadataFile = File(parsedVaultDir, "metadata.json")
         val jsonString = jsonSerializer.encodeToString(LyricMetadata.serializer(), lyricMetadata)
         metadataFile.writeText(jsonString)
     }
+
 
     fun writeErrorLog(module: String, error: String) {
         FileLogger.log(module, error)
