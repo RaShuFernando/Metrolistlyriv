@@ -183,7 +183,27 @@ object LyricsSyncManager {
 
             // Step 3: SSE Parsing & Smart Hashing
             val parser = SseParser()
-            val parsedLyricsList = parser.parse(tempFile)
+            val parsedLyricsList = parser.parse(tempFile).toMutableList()
+
+            // Fallback to LRCLIB API if not present in parsed SSE stream
+            val hasLrcLib = parsedLyricsList.any { it.provider.equals("lrclib", ignoreCase = true) }
+            if (!hasLrcLib) {
+                try {
+                    val fallbackLyric = LrcLibFallbackDownloader.fetchLyrics(
+                        trackName = metadata.title,
+                        artistName = metadata.artist,
+                        albumName = metadata.album,
+                        durationSeconds = metadata.durationSeconds
+                    )
+                    if (fallbackLyric != null) {
+                        parsedLyricsList.add(fallbackLyric)
+                        FileLogger.d(TAG, "Successfully fetched and appended fallback LRCLIB lyrics for: ${metadata.title}")
+                    }
+                } catch (e: Exception) {
+                    FileLogger.e(TAG, "Error fetching fallback LRCLIB lyrics for ${metadata.title}", e)
+                }
+            }
+
             val now = System.currentTimeMillis()
 
             val artistId = ensureArtist(dao, metadata.artist, metadata.artistBrowseId)
