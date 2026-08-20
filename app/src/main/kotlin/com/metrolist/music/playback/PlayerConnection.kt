@@ -29,9 +29,9 @@ import com.metrolist.music.extensions.currentMetadata
 import com.metrolist.music.extensions.getCurrentQueueIndex
 import com.metrolist.music.extensions.getQueueWindows
 import com.metrolist.music.extensions.metadata
-import com.metrolist.music.extensions.togglePlayPause
 import com.metrolist.music.lyrics.vault.LyricsSyncManager
 import com.metrolist.music.lyrics.vault.VaultMetadata
+import com.metrolist.music.extensions.withResolvedArtistNameAliases
 import com.metrolist.music.playback.MusicService.MusicBinder
 import com.metrolist.music.playback.queues.Queue
 import com.metrolist.music.utils.dataStore
@@ -337,6 +337,18 @@ class PlayerConnection(
             Timber.tag(TAG).e(e, "Error in playQueue")
             throw e
         }
+    }
+
+    fun refreshArtistNameAliases() {
+        val player = getPlayerOrNull() ?: return
+        repeat(player.mediaItemCount) { index ->
+            val mediaItem = player.getMediaItemAt(index)
+            val resolvedMediaItem = mediaItem.withResolvedArtistNameAliases()
+            if (resolvedMediaItem !== mediaItem) {
+                player.replaceMediaItem(index, resolvedMediaItem)
+            }
+        }
+        mediaMetadata.value = player.currentMetadata
     }
 
     fun startRadioSeamlessly() {
