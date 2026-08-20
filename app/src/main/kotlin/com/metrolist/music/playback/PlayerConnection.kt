@@ -29,6 +29,7 @@ import com.metrolist.music.extensions.currentMetadata
 import com.metrolist.music.extensions.getCurrentQueueIndex
 import com.metrolist.music.extensions.getQueueWindows
 import com.metrolist.music.extensions.metadata
+import com.metrolist.music.extensions.togglePlayPause
 import com.metrolist.music.lyrics.vault.LyricsSyncManager
 import com.metrolist.music.lyrics.vault.VaultMetadata
 import com.metrolist.music.extensions.withResolvedArtistNameAliases

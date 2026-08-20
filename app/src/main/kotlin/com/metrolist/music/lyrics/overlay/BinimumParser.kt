@@ -42,6 +42,10 @@ class BinimumParser : LyricParser {
         return ms
     }
 
+    private fun isEnglishOnly(text: String): Boolean {
+        return text.matches(Regex("^[a-zA-Z0-9\\s\\p{P}]+$"))
+    }
+
     override fun parse(rawText: String): List<OverlayLyricLine> {
         val lines = mutableListOf<OverlayLyricLine>()
         val agentMap = mutableMapOf<String, String>()
@@ -165,10 +169,12 @@ class BinimumParser : LyricParser {
                                 if (state.name == "p") {
                                     if (trimmedText.isNotEmpty() || state.words.isNotEmpty()) {
                                         val pKey = state.itunesKey ?: state.id
+                                        val originalLineText = rawTextStr.replace(Regex("\\s+"), " ").trim()
+                                        val englishOnly = isEnglishOnly(originalLineText)
                                         
                                         // For Binimum, fix word spacing by defaulting hasTrailingSpace = true for all words except the last one in a <p>
                                         val fixedWords = state.words.mapIndexed { index, word ->
-                                            val wordTransliterated = if (pKey != null) {
+                                            val wordTransliterated = if (!englishOnly && pKey != null) {
                                                 val romanizedWords = transliterationMap[pKey]
                                                 val match = romanizedWords?.find { Math.abs(it.startTimeMs - word.startTimeMs) < 100 }
                                                 match?.text
@@ -176,15 +182,20 @@ class BinimumParser : LyricParser {
                                             word.copy(hasTrailingSpace = index < state.words.size - 1, romanizedText = wordTransliterated)
                                         }
                                         
-                                        val translatedText = if (pKey != null) translationMap[pKey] else null
-                                        val romanizedText = if (pKey != null) {
+                                        var translatedText = if (!englishOnly && pKey != null) translationMap[pKey] else null
+                                        val romanizedText = if (!englishOnly && pKey != null) {
                                             val romanizedWords = transliterationMap[pKey]
                                             romanizedWords?.joinToString(separator = "") { it.text + (if (it.hasTrailingSpace) " " else "") }?.trim()
                                         } else null
 
+                                        // Fallback: If the translated string is exactly identical to the original string (ignoring case), drop the translation
+                                        if (translatedText != null && translatedText.equals(originalLineText, ignoreCase = true)) {
+                                            translatedText = null
+                                        }
+
                                         lines.add(
                                             OverlayLyricLine(
-                                                text = rawTextStr.replace(Regex("\\s+"), " ").trim(),
+                                                text = originalLineText,
                                                 startTimeMs = state.startTimeMs,
                                                 endTimeMs = state.endTimeMs,
                                                 words = fixedWords,
