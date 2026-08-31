@@ -50,7 +50,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.ui.draw.clip
 import com.metrolist.music.LocalPlayerAwareWindowInsets
 import com.metrolist.music.LocalPlayerConnection
-import com.metrolist.innertube.YouTube
 import com.metrolist.music.R
 import com.metrolist.music.lyrics.overlay.OverlayLyricsEngine
 import com.metrolist.music.lyrics.overlay.OverlayLyricsPreferences
@@ -400,39 +399,44 @@ fun OverlayLyricsSettingsScreen(
                                 return@Material3SettingsItem
                             }
 
+                            // Extract player properties synchronously on the Main thread
+                            val mediaId = currentMediaMetadata.id
+                            val title = currentMediaMetadata.title
+                            val artist = currentMediaMetadata.artists.joinToString(", ") { it.name }
+                            val album = currentMediaMetadata.album?.title ?: ""
+                            val durationSeconds = if (currentMediaMetadata.duration > 0) {
+                                currentMediaMetadata.duration
+                            } else {
+                                val playerDuration = playerConnection?.player?.duration ?: -1L
+                                if (playerDuration > 0) (playerDuration / 1000).toInt() else 0
+                            }
+                            val albumArtUrl = currentMediaMetadata.thumbnailUrl ?: ""
+                            val artistBrowseId = currentMediaMetadata.artists.firstOrNull()?.id
+                            val albumBrowseId = currentMediaMetadata.album?.id
+                            val isExplicit = currentMediaMetadata.explicit
+
+                            // Construct VaultMetadata on the Main thread
+                            val vaultMetadata = VaultMetadata(
+                                videoId = mediaId,
+                                title = title,
+                                artist = artist,
+                                album = album,
+                                durationSeconds = durationSeconds,
+                                albumArtUrl = albumArtUrl,
+                                composer = "",
+                                description = null,
+                                mediaId = mediaId,
+                                releaseYear = null,
+                                trackNumber = null,
+                                artistBrowseId = artistBrowseId,
+                                albumBrowseId = albumBrowseId,
+                                isExplicit = isExplicit
+                            )
+
                             Toast.makeText(context, context.getString(R.string.checking_for_lyrics), Toast.LENGTH_SHORT).show()
 
+                            // Launch IO coroutine with pre-computed metadata
                             coroutineScope.launch(Dispatchers.IO) {
-                                val durationSeconds = if (currentMediaMetadata.duration > 0) {
-                                    currentMediaMetadata.duration
-                                } else {
-                                    val playerDuration = playerConnection?.player?.duration ?: -1L
-                                    if (playerDuration > 0) (playerDuration / 1000).toInt() else 0
-                                }
-
-                                val description = try {
-                                    YouTube.getMediaInfo(currentMediaMetadata.id).getOrNull()?.description ?: ""
-                                } catch (e: Exception) {
-                                    ""
-                                }
-
-                                val vaultMetadata = VaultMetadata(
-                                    videoId = currentMediaMetadata.id,
-                                    title = currentMediaMetadata.title,
-                                    artist = currentMediaMetadata.artists.joinToString(", ") { it.name },
-                                    album = currentMediaMetadata.album?.title ?: "",
-                                    durationSeconds = durationSeconds,
-                                    albumArtUrl = currentMediaMetadata.thumbnailUrl ?: "",
-                                    composer = "",
-                                    description = description,
-                                    mediaId = currentMediaMetadata.id,
-                                    releaseYear = null,
-                                    trackNumber = null,
-                                    artistBrowseId = currentMediaMetadata.artists.firstOrNull()?.id,
-                                    albumBrowseId = currentMediaMetadata.album?.id,
-                                    isExplicit = currentMediaMetadata.explicit
-                                )
-
                                 val result = LyricsSyncManager.syncLyrics(
                                     context = context.applicationContext,
                                     metadata = vaultMetadata,
@@ -441,7 +445,7 @@ fun OverlayLyricsSettingsScreen(
 
                                 val masterPath = LyricsSyncManager.getMasterFolderPath()
                                 val dao = DatabaseProvider.getDatabase(context, masterPath).libraryDao()
-                                val index = dao.getSongIndexByVideoId(currentMediaMetadata.id)
+                                val index = dao.getSongIndexByVideoId(mediaId)
                                 val dir = index?.let { File(it.folderPath) }
                                 val updatedMetadata = if (dir != null && dir.exists()) {
                                     val vaultManager = VaultManager(masterPath)
@@ -474,7 +478,7 @@ fun OverlayLyricsSettingsScreen(
                                         LyricsSyncManager.SyncResult.FAILED,
                                         LyricsSyncManager.SyncResult.COOLDOWN_ACTIVE,
                                         LyricsSyncManager.SyncResult.RETRY_LIMIT_REACHED -> {
-                                            Toast.makeText(context, context.getString(R.string.lyrics_download_failed, currentMediaMetadata.title), Toast.LENGTH_SHORT).show()
+                                            Toast.makeText(context, context.getString(R.string.lyrics_download_failed, title), Toast.LENGTH_SHORT).show()
                                         }
                                     }
                                 }

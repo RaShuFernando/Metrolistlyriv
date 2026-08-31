@@ -756,7 +756,7 @@ interface DatabaseDao {
     suspend fun getSongsByIds(songIds: List<String>): List<Song>
 
     @Transaction
-    @Query("SELECT * FROM song WHERE dateDownload IS NOT NULL")
+    @Query("SELECT * FROM song WHERE dateDownload IS NOT NULL AND isDownloaded = 0")
     fun cachePlaylistSongs(): Flow<List<Song>>
 
     @Query("SELECT id FROM song WHERE id IN (:songIds)")
@@ -1226,7 +1226,7 @@ interface DatabaseDao {
     ): Int
 
     @Query("SELECT songId from playlist_song_map WHERE playlistId = :playlistId AND songId IN (:songIds)")
-    fun playlistDuplicates(
+    suspend fun playlistDuplicates(
         playlistId: String,
         songIds: List<String>,
     ): List<String>
@@ -1240,9 +1240,12 @@ interface DatabaseDao {
     @Query("UPDATE playlist_song_map SET position = position + :delta WHERE playlistId = :playlistId")
     fun shiftPlaylistSongPositions(playlistId: String, delta: Int)
 
+    @Query("SELECT COALESCE(MAX(position) + 1, 0) FROM playlist_song_map WHERE playlistId = :playlistId")
+    fun nextPlaylistSongPosition(playlistId: String): Int
+
     @Transaction
     fun addSongToPlaylist(playlist: Playlist, songIds: List<String>) {
-        var position = playlist.songCount
+        var position = nextPlaylistSongPosition(playlist.id)
         songIds.forEach { id ->
             val existingSong = getSongByIdBlocking(id)
             if (existingSong != null) {
@@ -1260,7 +1263,7 @@ interface DatabaseDao {
 
     // This prevents songs from being removed during automatic playlist synchronization
     @Transaction
-    fun addSongsToPlaylist(
+    suspend fun addSongsToPlaylist(
         playlist: Playlist,
         songs: List<Pair<String, String?>>, // Pair of (songId, setVideoId)
         prepend: Boolean = false,
@@ -1290,7 +1293,7 @@ interface DatabaseDao {
                 )
             }
         } else {
-            var position = playlist.songCount
+            var position = nextPlaylistSongPosition(playlist.id)
             songsToInsert.forEach { (id, setVideoId) ->
                 val existingSong = getSongByIdBlocking(id)!!
                 if (existingSong.song.inLibrary == null) {
@@ -1967,6 +1970,15 @@ interface DatabaseDao {
 
     @Update
     fun update(song: SongEntity)
+
+    @Query(
+        """
+        UPDATE song
+        SET thumbnailUrl = REPLACE(thumbnailUrl, '/maxresdefault.jpg', '/hqdefault.jpg')
+        WHERE thumbnailUrl LIKE 'https://i.ytimg.com/%/maxresdefault.jpg%'
+        """,
+    )
+    fun repairMissingVideoThumbnails()
 
     @Update
     fun update(artist: ArtistEntity)

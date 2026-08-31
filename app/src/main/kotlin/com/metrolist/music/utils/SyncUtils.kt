@@ -741,43 +741,34 @@ class SyncUtils @Inject constructor(
                     val remoteSongs = page.songs
                     val remoteIds = remoteSongs.map { it.id }.toSet()
                     val localSongs = database.likedSongEntitiesByNameAsc()
-                    val songIdsWithoutArtists = findSongIdsWithoutArtists(remoteIds)
-
-                    // Remove likes from songs not in remote
-                    localSongs.filterNot { it.id in remoteIds }.forEach { song ->
-                        try {
-                            database.update(song.localToggleLike())
-                            delay(DB_OPERATION_DELAY_MS)
-                        } catch (e: Exception) {
-                            Timber.e(e, "Failed to update song: ${song.id}")
-                        }
+                    val advertisedCount = page.playlist.songCountText?.filter { it.isDigit() }?.toIntOrNull()
+                    check(advertisedCount == null || remoteSongs.size >= advertisedCount) {
+                        "Liked-song response was incomplete (${remoteSongs.size}/$advertisedCount)"
                     }
-
-                    // Add/update songs from remote
+                    val songIdsWithoutArtists = findSongIdsWithoutArtists(remoteIds)
                     val now = LocalDateTime.now()
-                    remoteSongs.forEachIndexed { index, song ->
-                        try {
-                            val dbSong = database.songEntity(song.id)
-                            val timestamp = now.minusSeconds(index.toLong())
-                            val isVideoSong = song.isVideoSong
 
-                            database.withTransaction {
-                                if (dbSong == null) {
-                                    insert(song.toMediaMetadata()) {
-                                        it.copy(liked = true, likedDate = timestamp, isVideo = isVideoSong)
-                                    }
-                                } else {
-                                    if (song.id in songIdsWithoutArtists) {
-                                        insert(song.toMediaMetadata())
-                                    }
-                                    if (!dbSong.liked || dbSong.likedDate != timestamp || dbSong.isVideo != isVideoSong) {
-                                        update(dbSong.copy(liked = true, likedDate = timestamp, isVideo = isVideoSong))
-                                    }
+                    database.withTransaction {
+                        localSongs.filterNot { it.id in remoteIds }.forEach { song ->
+                            update(song.localToggleLike())
+                        }
+
+                        remoteSongs.forEachIndexed { index, song ->
+                            val dbSong = songEntity(song.id)
+                            val timestamp = dbSong?.likedDate ?: now.minusSeconds(index.toLong())
+                            val isVideoSong = song.isVideoSong
+                            if (dbSong == null) {
+                                insert(song.toMediaMetadata()) {
+                                    it.copy(liked = true, likedDate = timestamp, isVideo = isVideoSong)
+                                }
+                            } else {
+                                if (song.id in songIdsWithoutArtists) {
+                                    insert(song.toMediaMetadata())
+                                }
+                                if (!dbSong.liked || dbSong.likedDate == null || dbSong.isVideo != isVideoSong) {
+                                    update(dbSong.copy(liked = true, likedDate = timestamp, isVideo = isVideoSong))
                                 }
                             }
-                            delay(DB_OPERATION_DELAY_MS)
-                        } catch (e: Exception) {
-                            Timber.e(e, "Failed to process song: ${song.id}")
                         }
                     }
 
@@ -814,34 +805,28 @@ class SyncUtils @Inject constructor(
                     val remoteIds = remoteSongs.map { it.id }.toSet()
                     val localSongs = database.librarySongEntitiesByNameAsc()
                     val songIdsWithoutArtists = findSongIdsWithoutArtists(remoteIds)
+                    val now = LocalDateTime.now()
 
-                    localSongs.filterNot { it.id in remoteIds }.forEach { song ->
-                        try {
-                            database.update(song.toggleLibrary(syncToYouTube = false))
-                            delay(DB_OPERATION_DELAY_MS)
-                        } catch (e: Exception) {
-                            Timber.e(e, "Failed to update song: ${song.id}")
+                    database.withTransaction {
+                        localSongs.filterNot { it.id in remoteIds }.forEach { song ->
+                            update(song.withLibraryMembership(isInLibrary = false))
                         }
-                    }
 
-                    remoteSongs.forEach { song ->
-                        try {
-                            val dbSong = database.songEntity(song.id)
-                            database.withTransaction {
-                                if (dbSong == null) {
-                                    insert(song.toMediaMetadata()) { it.toggleLibrary(syncToYouTube = false) }
-                                } else {
-                                    if (song.id in songIdsWithoutArtists) {
-                                        insert(song.toMediaMetadata())
-                                    }
-                                    if (dbSong.inLibrary == null) {
-                                        update(dbSong.toggleLibrary(syncToYouTube = false))
-                                    }
+                        remoteSongs.forEachIndexed { index, song ->
+                            val dbSong = songEntity(song.id)
+                            val timestamp = now.minusSeconds((remoteSongs.lastIndex - index).toLong())
+                            if (dbSong == null) {
+                                insert(song.toMediaMetadata()) {
+                                    it.withLibraryMembership(isInLibrary = true, addedAt = timestamp)
+                                }
+                            } else {
+                                if (song.id in songIdsWithoutArtists) {
+                                    insert(song.toMediaMetadata())
+                                }
+                                if (dbSong.inLibrary == null) {
+                                    update(dbSong.withLibraryMembership(isInLibrary = true, addedAt = timestamp))
                                 }
                             }
-                            delay(DB_OPERATION_DELAY_MS)
-                        } catch (e: Exception) {
-                            Timber.e(e, "Failed to process song: ${song.id}")
                         }
                     }
 

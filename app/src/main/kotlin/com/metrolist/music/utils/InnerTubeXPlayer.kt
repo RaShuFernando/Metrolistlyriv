@@ -35,7 +35,6 @@ object InnerTubeXPlayer {
     private const val TAG = "InnerTubeXPlayer"
     private const val WEB_REMIX_FAILURE_TTL_MS = 5 * 60 * 1000L
     private const val DEFAULT_STREAM_TTL_SECONDS = 5 * 60
-    private const val POTOKEN_WARMUP_VIDEO_ID = "jNQXAC9IVRw"
 
     @Volatile
     private var applicationContext: Context? = null
@@ -46,18 +45,12 @@ object InnerTubeXPlayer {
     private val bundleMutex = Mutex()
     private val webRemixFailures = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
-    @Volatile
-    var disabledStreamClients: Set<String> = emptySet()
-
     @Synchronized
     fun initialize(context: Context) {
         if (applicationContext == null) applicationContext = context.applicationContext
     }
 
-    suspend fun prewarm() {
-        bundle().extractor.prewarm()
-        tokenProvider.prewarm()
-    }
+    suspend fun prewarm() = bundle().extractor.prewarm()
 
     suspend fun playerResponseForPlayback(
         videoId: String,
@@ -81,7 +74,6 @@ object InnerTubeXPlayer {
                 )
             val excludedClients =
                 buildSet {
-                    addAll(disabledStreamClients)
                     if (hasRecentWebRemixFailure(videoId)) add("WEB_REMIX")
                 }
             val stream =
@@ -203,10 +195,6 @@ object InnerTubeXPlayer {
                         visitorData = visitorData,
                     )
                 }
-
-            override suspend fun prewarm(cookie: String?) {
-                YouTube.visitorData?.let { poTokenGenerator.getWebClientPoToken(POTOKEN_WARMUP_VIDEO_ID, it) }
-            }
 
             override suspend fun close() {
                 poTokenGenerator.close()
