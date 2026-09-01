@@ -525,6 +525,8 @@
 
     <!-- Playback errors -->
     <string name="error_playback_failed">Playback failed</string>
+    <string name="error_no_internet_connection">No internet connection</string>
+    <string name="error_offline_playback">You’re offline. Connect to the internet, or play a track downloaded for offline use.</string>
     <string name="error_explicit_login_recommended">Explicit playback works better with a logged-in account.</string>
     <string name="error_job_cancelled">The video is not available for playback. Try again or skip to the next song.</string>
     <string name="error_episode_save">Failed to save episode</string>

@@ -22,4 +22,17 @@ class PlaybackErrorTest {
             error.causeChain(),
         )
     }
+
+    @Test
+    fun `offline warning replaces misleading stream errors`() {
+        assertEquals(
+            listOf("Connect to the internet"),
+            playbackErrorMessages(
+                isOnline = false,
+                offlineMessage = "Connect to the internet",
+                guidance = null,
+                rawErrorMessages = listOf("This track is unavailable"),
+            ),
+        )
+    }
 }
