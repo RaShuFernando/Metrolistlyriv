@@ -14,10 +14,12 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationState
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDecay
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.exponentialDecay
 import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.verticalDrag
@@ -575,7 +577,13 @@ fun ExperimentalLyrics(
                 }
                 val anim = Animatable(start)
                 var lastValue = start
-                anim.animateTo(0f, tween((abs(start) / 4f).toInt().coerceIn(200, 600), easing = FastOutSlowInEasing)) {
+                anim.animateTo(
+                    targetValue = 0f,
+                    animationSpec = spring(
+                        dampingRatio = 0.9f,
+                        stiffness = Spring.StiffnessLow
+                    )
+                ) {
                     userManualOffset += (value - lastValue)
                     lastValue = value
                 }
@@ -718,7 +726,10 @@ fun ExperimentalLyrics(
                         targetValue = targetProviderBase,
                         animationSpec = if (isInitialLayout || !isAutoScrollEnabled) snap()
                         else {
-                            tween(750, 0, FastOutSlowInEasing)
+                            spring(
+                                dampingRatio = 0.9f,
+                                stiffness = Spring.StiffnessLow
+                            )
                         },
                         label = "lyricsProviderOffset"
                     )
@@ -741,7 +752,10 @@ fun ExperimentalLyrics(
                             targetValue = if (isAutoScrollEnabled) targetOffset else frozenOffset.floatValue,
                             animationSpec = if (isInitialLayout || !isAutoScrollEnabled) snap() 
                                             else {
-                                                tween(750, (distance * LYRICS_STAGGER_DELAY_PER_DISTANCE).coerceAtMost(LYRICS_STAGGER_DELAY_MAX_MS), FastOutSlowInEasing)
+                                                spring(
+                                                    dampingRatio = 0.9f,
+                                                    stiffness = Spring.StiffnessLow
+                                                )
                                             },
                             label = "lyricStaggeredOffset_$listIndex"
                         )

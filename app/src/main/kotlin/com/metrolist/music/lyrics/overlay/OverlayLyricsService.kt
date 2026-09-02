@@ -17,7 +17,9 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
@@ -453,19 +455,32 @@ fun OverlayLyricsView(
         contentAlignment = Alignment.Center
     ) {
         val enterTransition = when (lineAnimation) {
-            1 -> fadeIn()
-            2 -> slideInVertically { it } + fadeIn()
-            3 -> androidx.compose.animation.scaleIn() + fadeIn()
-            4 -> fadeIn() // 3D Flip fallback enter
-            5 -> fadeIn() // Blur Reveal fallback enter
+            1 -> fadeIn(animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing))
+            2 -> slideInVertically(animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing)) { it } + 
+                 fadeIn(animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing))
+            3 -> androidx.compose.animation.scaleIn(
+                     animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing),
+                     initialScale = 0.95f
+                 ) + fadeIn(animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing))
+            4 -> fadeIn(animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing))
+            5 -> fadeIn(animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing))
             else -> androidx.compose.animation.EnterTransition.None
         }
         val exitTransition = when (lineAnimation) {
-            1 -> fadeOut() + androidx.compose.animation.shrinkVertically(shrinkTowards = Alignment.Top)
-            2 -> slideOutVertically { -it } + fadeOut() + androidx.compose.animation.shrinkVertically(shrinkTowards = Alignment.Top)
-            3 -> androidx.compose.animation.scaleOut() + fadeOut() + androidx.compose.animation.shrinkVertically(shrinkTowards = Alignment.Top)
-            4 -> fadeOut() + androidx.compose.animation.shrinkVertically(shrinkTowards = Alignment.Top)
-            5 -> fadeOut() + androidx.compose.animation.shrinkVertically(shrinkTowards = Alignment.Top)
+            1 -> fadeOut(animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing)) + 
+                 androidx.compose.animation.shrinkVertically(animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Top)
+            2 -> slideOutVertically(animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing)) { -it } + 
+                 fadeOut(animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing)) + 
+                 androidx.compose.animation.shrinkVertically(animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Top)
+            3 -> androidx.compose.animation.scaleOut(
+                     animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing),
+                     targetScale = 0.95f
+                 ) + fadeOut(animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing)) + 
+                 androidx.compose.animation.shrinkVertically(animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Top)
+            4 -> fadeOut(animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing)) + 
+                 androidx.compose.animation.shrinkVertically(animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Top)
+            5 -> fadeOut(animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing)) + 
+                 androidx.compose.animation.shrinkVertically(animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Top)
             else -> androidx.compose.animation.ExitTransition.None
         }
 

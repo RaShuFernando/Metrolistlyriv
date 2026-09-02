@@ -16,7 +16,9 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -618,7 +620,10 @@ fun OriginalLyrics(
                 if (kotlin.math.abs(offset) > 10) {
                     lazyListState.animateScrollBy(
                         value = offset.toFloat(),
-                        animationSpec = tween(durationMillis = duration),
+                        animationSpec = spring(
+                            dampingRatio = 0.9f,
+                            stiffness = Spring.StiffnessLow
+                        ),
                     )
                 }
             } else {
@@ -948,7 +953,10 @@ fun OriginalLyrics(
                                                     if (kotlin.math.abs(offset) > 10) { // Only animate if not already centered
                                                         lazyListState.animateScrollBy(
                                                             value = offset.toFloat(),
-                                                            animationSpec = tween(durationMillis = 1500), // Reduced to half speed
+                                                            animationSpec = spring(
+                                                                dampingRatio = 0.9f,
+                                                                stiffness = Spring.StiffnessLow
+                                                            ),
                                                         )
                                                     }
                                                 }
@@ -997,11 +1005,11 @@ fun OriginalLyrics(
                                     isActiveByIndex || isActiveByTime -> 1f
                                     else -> 0.5f
                                 },
-                            animationSpec = tween(durationMillis = 400),
+                            animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing),
                         )
                         val scale by animateFloatAsState(
-                            targetValue = if (isActiveByIndex || isActiveByTime) 1.05f else 1f,
-                            animationSpec = tween(durationMillis = 400),
+                            targetValue = if (isActiveByIndex || isActiveByTime) 1.0f else 0.95f,
+                            animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing),
                         )
 
                         // Determine alignment based on agent for multi-singer support
@@ -1174,9 +1182,7 @@ fun OriginalLyrics(
                                             val fadeProgress =
                                                 if (isWordActive && wordDuration > 0) {
                                                     val timeElapsed = effectivePlaybackPosition - wordStartMs
-                                                    val linear = (timeElapsed.toFloat() / wordDuration.toFloat()).coerceIn(0f, 1f)
-                                                    // Smooth cubic easing
-                                                    linear * linear * (3f - 2f * linear)
+                                                    (timeElapsed.toFloat() / wordDuration.toFloat()).coerceIn(0f, 1f)
                                                 } else if (hasWordPassed) {
                                                     1f
                                                 } else {
@@ -1247,13 +1253,11 @@ fun OriginalLyrics(
 
                                             val fillProgress =
                                                 if (isWordActive && wordDuration > 0) {
-                                                    val linear =
-                                                        ((effectivePlaybackPosition - wordStartMs).toFloat() / wordDuration)
-                                                            .coerceIn(
-                                                                0f,
-                                                                1f,
-                                                            )
-                                                    linear * linear * (3f - 2f * linear)
+                                                    ((effectivePlaybackPosition - wordStartMs).toFloat() / wordDuration)
+                                                        .coerceIn(
+                                                            0f,
+                                                            1f,
+                                                        )
                                                 } else if (hasWordPassed) {
                                                     1f
                                                 } else {
@@ -1411,9 +1415,7 @@ fun OriginalLyrics(
 
                                             if (isWordActive && wordDuration > 0) {
                                                 val timeElapsed = effectivePlaybackPosition - wordStartMs
-                                                val linearProgress = (timeElapsed.toFloat() / wordDuration.toFloat()).coerceIn(0f, 1f)
-                                                // Smoother easing curve for more natural fill animation
-                                                val fillProgress = linearProgress * linearProgress * (3f - 2f * linearProgress)
+                                                val fillProgress = (timeElapsed.toFloat() / wordDuration.toFloat()).coerceIn(0f, 1f)
 
                                                 // Enhanced glow intensity calculation
                                                 val glowIntensity = fillProgress * fillProgress
@@ -1509,8 +1511,8 @@ fun OriginalLyrics(
                                                     0f
                                                 }
 
-                                            // Smooth cubic easing for natural animation
-                                            val smoothProgress = rawProgress * rawProgress * (3f - 2f * rawProgress)
+                                            // Linear progress for strict sync timing
+                                            val smoothProgress = rawProgress
 
                                             val wordAlpha =
                                                 when {

@@ -7,6 +7,7 @@ package com.metrolist.music.ui.component
 
 import android.graphics.BlurMaskFilter
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -196,21 +197,56 @@ internal fun LyricsLine(
     }) {
         @Composable
         fun LyricContent() {
-            Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = agentAlignment) {
-                val inactiveAlpha = if (item.isBackground) 0.08f else 0.2f
-                val activeAlpha = 1f
-                val focusedAlpha = if (item.isBackground) 0.5f else 0.3f
-                val targetAlpha = if (!isSynced || item.isBackground || isActiveLine) {
-                    activeAlpha
-                } else if (isAutoScrollEnabled && displayedCurrentLineIndex >= 0) {
-                    when (abs(index - displayedCurrentLineIndex)) {
-                        0 -> focusedAlpha
-                        1 -> 0.2f; 2 -> 0.2f; 3 -> 0.15f; 4 -> 0.1f; else -> 0.08f
-                    }
-                } else inactiveAlpha
-                
-                val animatedAlpha by animateFloatAsState(targetAlpha, tween(250), label = "lyricsLineAlpha")
-                val lineColor = expressiveAccent.copy(alpha = if (item.isBackground) focusedAlpha else animatedAlpha)
+            val targetAlpha = if (!isSynced || (isSelected && isSelectionModeActive) || isActiveLine) {
+                1.0f
+            } else if (item.isBackground) {
+                0.35f
+            } else if (isAutoScrollEnabled && displayedCurrentLineIndex >= 0) {
+                when (abs(index - displayedCurrentLineIndex)) {
+                    0 -> 0.6f
+                    1 -> 0.5f
+                    2 -> 0.45f
+                    3 -> 0.4f
+                    else -> 0.35f
+                }
+            } else 0.5f
+            
+            val animatedAlpha by animateFloatAsState(
+                targetValue = targetAlpha,
+                animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing),
+                label = "lyricsLineAlpha"
+            )
+
+            val targetScale = if (!isSynced || (isSelected && isSelectionModeActive) || isActiveLine) {
+                1.0f
+            } else {
+                0.95f
+            }
+
+            val animatedScale by animateFloatAsState(
+                targetValue = targetScale,
+                animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing),
+                label = "lyricsLineScale"
+            )
+
+            val focusedAlpha = if (item.isBackground) 0.5f else 0.3f
+            val lineColor = expressiveAccent.copy(alpha = if (item.isBackground) focusedAlpha else 1f)
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .graphicsLayer {
+                        scaleX = animatedScale
+                        scaleY = animatedScale
+                        alpha = animatedAlpha
+                        transformOrigin = when (agentTextAlign) {
+                            TextAlign.Left -> TransformOrigin(0f, 0.5f)
+                            TextAlign.Right -> TransformOrigin(1f, 0.5f)
+                            else -> TransformOrigin(0.5f, 0.5f)
+                        }
+                    },
+                horizontalAlignment = agentAlignment
+            ) {
                 
                 val romanizedTextState by item.romanizedTextFlow.collectAsStateWithLifecycle()
                 val isRomanizedAvailable = romanizedTextState != null
