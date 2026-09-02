@@ -9,6 +9,8 @@ import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.service.notification.NotificationListenerService
 import androidx.core.content.ContextCompat
@@ -136,7 +138,7 @@ class ExternalPlaybackListenerService : NotificationListenerService() {
         try {
             mediaSessionManager = getSystemService(Context.MEDIA_SESSION_SERVICE) as? MediaSessionManager
             val component = ComponentName(this, ExternalPlaybackListenerService::class.java)
-            mediaSessionManager?.addOnActiveSessionsChangedListener(sessionListener, component)
+            mediaSessionManager?.addOnActiveSessionsChangedListener(sessionListener, component, Handler(Looper.getMainLooper()))
             val controllers = mediaSessionManager?.getActiveSessions(component)
             updateActiveSessions(controllers)
         } catch (e: Exception) {
@@ -225,7 +227,7 @@ class ExternalPlaybackListenerService : NotificationListenerService() {
             }
         }
 
-        controller.registerCallback(callback)
+        controller.registerCallback(callback, Handler(Looper.getMainLooper()))
         activeControllers[controller] = callback
 
         // Process current state immediately
