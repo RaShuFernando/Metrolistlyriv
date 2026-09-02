@@ -125,12 +125,26 @@ class OverlayLyricsService : Service() {
         private val _isExternalPlayback = MutableStateFlow(false)
         val isExternalPlayback: StateFlow<Boolean> = _isExternalPlayback.asStateFlow()
 
+        @Volatile
+        private var isExclusiveExternalMode = false
+
+        fun setExclusiveExternalMode(exclusive: Boolean) {
+            isExclusiveExternalMode = exclusive
+            if (exclusive && !_isExternalPlayback.value) {
+                clearInternalPlayback()
+            }
+        }
+
         fun updatePlaybackState(
             videoId: String,
             positionMs: Long,
             playing: Boolean,
             isExternal: Boolean = false
         ) {
+            if (!isExternal && isExclusiveExternalMode) {
+                return
+            }
+
             if (_isExternalPlayback.value && !isExternal) {
                 // If external playback is currently active and this is an internal idle update,
                 // ignore it to prevent resetting external lyrics or showing "No lyrics found"
@@ -153,6 +167,14 @@ class OverlayLyricsService : Service() {
 
         fun updateExternalPlaybackState(videoId: String, positionMs: Long, playing: Boolean) {
             updatePlaybackState(videoId, positionMs, playing, isExternal = true)
+        }
+
+        fun clearInternalPlayback() {
+            if (!_isExternalPlayback.value) {
+                _currentVideoId.value = ""
+                _currentPositionMs.value = 0L
+                _isPlaying.value = false
+            }
         }
 
         fun clearExternalPlayback() {
@@ -200,6 +222,15 @@ class OverlayLyricsService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        
+        serviceScope.launch {
+            OverlayLyricsPreferences.getExclusiveExternalLyricsEnabled(applicationContext).collect { isExclusive ->
+                setExclusiveExternalMode(isExclusive)
+                if (isExclusive && !_isExternalPlayback.value) {
+                    currentUiState.value = LyricsUiState.Hidden
+                }
+            }
+        }
         
         // Start Foreground early to prevent ForegroundServiceDidNotStartInTimeException
         val channelId = "overlay_lyrics_channel"
@@ -393,6 +424,7 @@ class OverlayLyricsService : Service() {
         }
         
         lifecycleOwner.lifecycleRegistry.currentState = Lifecycle.State.DESTROYED
+        serviceScope.cancel()
         super.onDestroy()
     }
 }

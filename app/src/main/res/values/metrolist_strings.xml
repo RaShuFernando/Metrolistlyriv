@@ -1027,6 +1027,8 @@
 
     <string name="external_overlay_lyrics_toggle">External Music Lyrics</string>
     <string name="external_overlay_lyrics_toggle_desc">Show overlay lyrics when playing music in external YouTube Music</string>
+    <string name="exclusive_external_lyrics_toggle">Exclusive External Lyrics Mode</string>
+    <string name="exclusive_external_lyrics_toggle_desc">Exclusively display lyrics overlay for patched YouTube Music and disable internal player overlay</string>
     <string name="force_refresh_lyrics">Force Refresh Current Lyrics</string>
     <string name="force_refresh_lyrics_desc">Re-check server and download fresh lyrics for currently playing song</string>
     <string name="checking_for_lyrics">Checking for lyrics…</string>

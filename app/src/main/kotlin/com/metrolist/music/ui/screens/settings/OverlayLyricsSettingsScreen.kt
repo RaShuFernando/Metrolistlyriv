@@ -78,6 +78,7 @@ fun OverlayLyricsSettingsScreen(
 
     val enabled by OverlayLyricsPreferences.getOverlayEnabled(context).collectAsState(initial = false)
     val externalOverlayEnabled by OverlayLyricsPreferences.getExternalOverlayEnabled(context).collectAsState(initial = true)
+    val exclusiveExternalOverlayEnabled by OverlayLyricsPreferences.getExclusiveExternalLyricsEnabled(context).collectAsState(initial = false)
     val fontSize by OverlayLyricsPreferences.getOverlayFontSize(context).collectAsState(initial = 18f)
     val showRomanized by OverlayLyricsPreferences.getShowRomanizedLyrics(context).collectAsState(initial = true)
     val showTranslated by OverlayLyricsPreferences.getShowTranslatedLyrics(context).collectAsState(initial = true)
@@ -213,6 +214,24 @@ fun OverlayLyricsSettingsScreen(
                                         OverlayLyricsPreferences.setExternalOverlayEnabled(context, newValue)
                                         if (!newValue) {
                                             OverlayLyricsService.clearExternalPlayback()
+                                        }
+                                    }
+                                }
+                            )
+                        }
+                    ),
+                    Material3SettingsItem(
+                        icon = painterResource(R.drawable.security),
+                        title = { Text(stringResource(R.string.exclusive_external_lyrics_toggle)) },
+                        description = { Text(stringResource(R.string.exclusive_external_lyrics_toggle_desc)) },
+                        trailingContent = {
+                            Switch(
+                                checked = exclusiveExternalOverlayEnabled,
+                                onCheckedChange = { newValue ->
+                                    coroutineScope.launch {
+                                        OverlayLyricsPreferences.setExclusiveExternalLyricsEnabled(context, newValue)
+                                        if (newValue && !OverlayLyricsService.isExternalPlayback.value) {
+                                            OverlayLyricsService.clearInternalPlayback()
                                         }
                                     }
                                 }

@@ -1,13 +1,17 @@
 package com.metrolist.music.lyrics.overlay
 
+import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
 import android.os.SystemClock
 import android.service.notification.NotificationListenerService
+import androidx.core.content.ContextCompat
 import com.metrolist.music.lyrics.vault.DatabaseProvider
 import com.metrolist.music.lyrics.vault.FileLogger
 import com.metrolist.music.lyrics.vault.LyricsSyncManager
@@ -24,37 +28,83 @@ import java.util.concurrent.ConcurrentHashMap
 
 /**
  * ExternalPlaybackListenerService monitors media playback events specifically from
- * app.morphe.android.apps.youtube.music. It extracts Title, Artist, and Album metadata,
- * queries the local vault database, and if a match is found, triggers the overlay module.
+ * patched YouTube Music (app.morphe.android.apps.youtube.music).
  *
- * Key Design & Robustness Features:
- * 1. Active State Expansion: Treats STATE_PLAYING, STATE_BUFFERING, and STATE_CONNECTING as active playback.
- * 2. Instant Metadata Retry: Handles early empty/null metadata events via a non-blocking retry polling loop.
- * 3. Single-Job Debouncing: Cancels ongoing playback jobs before starting a new state handler.
- * 4. High-Precision Interpolated Ticker: Smoothly advances lyric timeline while media is playing.
- * 5. State Filtering: Accurately handles PLAYING, PAUSED, and STOPPED states without flickering.
- * 6. Vault Retrieval Normalization: Cleans title and artist artifacts for reliable matching.
- * 7. Strict Zero-Download Constraint: Only plays if lyrics exist locally in the vault.
+ * Responsibilities:
+ * 1. Dynamically registers a BroadcastReceiver for Morphe and YouTube Music metadata changes.
+ * 2. Monitors active MediaSessions, filtering strictly for app.morphe.android.apps.youtube.music in exclusive mode.
+ * 3. Extracts track metadata and videoId, resolves info via InnerTube, and syncs lyrics to the local vault.
+ * 4. Advances real-time interpolated playback position to OverlayLyricsService.
  */
 class ExternalPlaybackListenerService : NotificationListenerService() {
 
     companion object {
         private const val TAG = "ExternalPlaybackListener"
         const val TARGET_PACKAGE = "app.morphe.android.apps.youtube.music"
+        const val YTM_PACKAGE = "com.google.android.apps.youtube.music"
     }
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var playbackJob: Job? = null
     private var isExternalEnabled = true
+    private var isExclusiveEnabled = false
     private var mediaSessionManager: MediaSessionManager? = null
     private val activeControllers = ConcurrentHashMap<MediaController, MediaController.Callback>()
+    
+    @Volatile
+    private var currentInterceptedVideoId: String? = null
 
     private val sessionListener = MediaSessionManager.OnActiveSessionsChangedListener { controllers ->
         updateActiveSessions(controllers)
     }
 
+    private val metadataReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent == null) return
+            val action = intent.action
+            FileLogger.d(TAG, "Received metadata broadcast action: $action")
+
+            val videoId = intent.getStringExtra("videoId")
+                ?: intent.getStringExtra("video_id")
+                ?: intent.getStringExtra("id")
+
+            if (!videoId.isNullOrBlank()) {
+                FileLogger.d(TAG, "Intercepted videoId: $videoId from broadcast ($action)")
+                currentInterceptedVideoId = videoId
+                serviceScope.launch {
+                    val hasLyrics = ExternalLyricsSyncManager.ensureLyricsForVideo(applicationContext, videoId)
+                    if (hasLyrics) {
+                        withContext(Dispatchers.Main) {
+                            OverlayLyricsService.start(applicationContext)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
+
+        // Register dynamic BroadcastReceiver for Morphe & YTM metadata events
+        val filter = IntentFilter().apply {
+            addAction("app.morphe.music.METADATA_CHANGED")
+            addAction("com.google.android.apps.youtube.music.METADATA_CHANGED")
+            addAction("app.morphe.patches.music.VIDEO_ID_CHANGED")
+        }
+        try {
+            ContextCompat.registerReceiver(
+                this,
+                metadataReceiver,
+                filter,
+                ContextCompat.RECEIVER_EXPORTED
+            )
+            FileLogger.d(TAG, "Dynamically registered Morphe/YTM metadata BroadcastReceiver")
+        } catch (e: Exception) {
+            FileLogger.e(TAG, "Error registering metadata BroadcastReceiver", e)
+        }
+
+        // Collect preferences
         serviceScope.launch {
             OverlayLyricsPreferences.getExternalOverlayEnabled(applicationContext).collect { enabled ->
                 isExternalEnabled = enabled
@@ -63,6 +113,19 @@ class ExternalPlaybackListenerService : NotificationListenerService() {
                     playbackJob = null
                     OverlayLyricsService.clearExternalPlayback()
                 }
+            }
+        }
+
+        serviceScope.launch {
+            OverlayLyricsPreferences.getExclusiveExternalLyricsEnabled(applicationContext).collect { exclusive ->
+                isExclusiveEnabled = exclusive
+                val component = ComponentName(this@ExternalPlaybackListenerService, ExternalPlaybackListenerService::class.java)
+                val controllers = try {
+                    mediaSessionManager?.getActiveSessions(component)
+                } catch (e: Exception) {
+                    null
+                }
+                updateActiveSessions(controllers)
             }
         }
     }
@@ -96,6 +159,11 @@ class ExternalPlaybackListenerService : NotificationListenerService() {
 
     override fun onDestroy() {
         super.onDestroy()
+        try {
+            unregisterReceiver(metadataReceiver)
+        } catch (e: Exception) {
+            FileLogger.e(TAG, "Error unregistering metadata receiver", e)
+        }
         playbackJob?.cancel()
         playbackJob = null
         unregisterAllControllers()
@@ -103,9 +171,18 @@ class ExternalPlaybackListenerService : NotificationListenerService() {
         OverlayLyricsService.clearExternalPlayback()
     }
 
+    private fun isTargetPackage(packageName: String?): Boolean {
+        if (packageName == null) return false
+        return if (isExclusiveEnabled) {
+            packageName == TARGET_PACKAGE
+        } else {
+            packageName == TARGET_PACKAGE || packageName == YTM_PACKAGE
+        }
+    }
+
     private fun updateActiveSessions(controllers: List<MediaController>?) {
         unregisterAllControllers()
-        if (controllers.isNullOrEmpty()) {
+        if (controllers.isNullOrEmpty() || !isExternalEnabled) {
             playbackJob?.cancel()
             playbackJob = null
             OverlayLyricsService.clearExternalPlayback()
@@ -114,7 +191,7 @@ class ExternalPlaybackListenerService : NotificationListenerService() {
 
         var foundTarget = false
         for (controller in controllers) {
-            if (controller.packageName == TARGET_PACKAGE) {
+            if (isTargetPackage(controller.packageName)) {
                 registerController(controller)
                 foundTarget = true
             }
@@ -179,7 +256,7 @@ class ExternalPlaybackListenerService : NotificationListenerService() {
         metadata: MediaMetadata?,
         playbackState: PlaybackState?
     ) {
-        if (controller.packageName != TARGET_PACKAGE || !isExternalEnabled) {
+        if (!isTargetPackage(controller.packageName) || !isExternalEnabled) {
             return
         }
 
@@ -226,32 +303,61 @@ class ExternalPlaybackListenerService : NotificationListenerService() {
                 rawArtist = currentMetadata?.getString(MediaMetadata.METADATA_KEY_ARTIST)
             }
 
-            if (rawTitle.isNullOrBlank() || rawArtist.isNullOrBlank()) {
-                // Metadata still unavailable after retries
-                return@launch
+            // Determine target videoId from intercepted broadcast or local cache
+            val targetVideoId = currentInterceptedVideoId ?: run {
+                if (!rawTitle.isNullOrBlank() && !rawArtist.isNullOrBlank()) {
+                    ExternalLyricsSyncManager.findCachedVideoId(applicationContext, rawTitle, rawArtist)
+                } else null
             }
 
-            val rawAlbum = currentMetadata?.getString(MediaMetadata.METADATA_KEY_ALBUM) ?: ""
+            if (targetVideoId != null) {
+                val hasLyrics = ExternalLyricsSyncManager.ensureLyricsForVideo(applicationContext, targetVideoId)
+                if (hasLyrics) {
+                    FileLogger.d(TAG, "Lyrics active for videoId: $targetVideoId (isPlaying=$isPlaying, pos=$basePositionMs)")
+                    withContext(Dispatchers.Main) {
+                        OverlayLyricsService.start(applicationContext)
+                    }
 
-            handlePlaybackEvent(
-                rawTitle = rawTitle,
-                rawArtist = rawArtist,
-                rawAlbum = rawAlbum,
-                basePositionMs = basePositionMs,
-                lastUpdateTime = lastUpdateTime,
-                speed = speed,
-                isPlaying = isPlaying
-            )
+                    if (isPlaying) {
+                        while (isActive) {
+                            val timeDelta = (SystemClock.elapsedRealtime() - lastUpdateTime).coerceAtLeast(0L)
+                            val interpolatedPos = basePositionMs + (timeDelta * speed).toLong()
+
+                            OverlayLyricsService.updatePlaybackState(
+                                videoId = targetVideoId,
+                                positionMs = interpolatedPos,
+                                playing = true,
+                                isExternal = true
+                            )
+                            delay(100L)
+                        }
+                    } else {
+                        OverlayLyricsService.updatePlaybackState(
+                            videoId = targetVideoId,
+                            positionMs = basePositionMs,
+                            playing = false,
+                            isExternal = true
+                        )
+                    }
+                } else {
+                    OverlayLyricsService.updatePlaybackState("", 0L, false, isExternal = true)
+                }
+            } else if (!rawTitle.isNullOrBlank() && !rawArtist.isNullOrBlank()) {
+                val rawAlbum = currentMetadata?.getString(MediaMetadata.METADATA_KEY_ALBUM) ?: ""
+                handlePlaybackEventByMetadata(
+                    rawTitle = rawTitle,
+                    rawArtist = rawArtist,
+                    rawAlbum = rawAlbum,
+                    basePositionMs = basePositionMs,
+                    lastUpdateTime = lastUpdateTime,
+                    speed = speed,
+                    isPlaying = isPlaying
+                )
+            }
         }
     }
 
-    private fun cleanMetadata(text: String): String {
-        return text.replace(Regex("""[\u200B-\u200D\uFEFF\u200E\u200F]"""), "")
-            .replace(Regex("""\s+"""), " ")
-            .trim()
-    }
-
-    private suspend fun CoroutineScope.handlePlaybackEvent(
+    private suspend fun CoroutineScope.handlePlaybackEventByMetadata(
         rawTitle: String,
         rawArtist: String,
         rawAlbum: String,
@@ -261,70 +367,45 @@ class ExternalPlaybackListenerService : NotificationListenerService() {
         isPlaying: Boolean
     ) {
         try {
-            val title = cleanMetadata(rawTitle)
-            val artist = cleanMetadata(rawArtist)
-            val album = cleanMetadata(rawAlbum)
+            val matchedVideoId = ExternalLyricsSyncManager.findCachedVideoId(applicationContext, rawTitle, rawArtist)
+            if (matchedVideoId != null) {
+                val hasLyrics = ExternalLyricsSyncManager.ensureLyricsForVideo(applicationContext, matchedVideoId)
+                if (hasLyrics) {
+                    withContext(Dispatchers.Main) {
+                        OverlayLyricsService.start(applicationContext)
+                    }
 
-            val masterPath = LyricsSyncManager.getMasterFolderPath()
-            val db = DatabaseProvider.getDatabase(applicationContext, masterPath)
-            val dao = db.libraryDao()
+                    if (isPlaying) {
+                        while (isActive) {
+                            val timeDelta = (SystemClock.elapsedRealtime() - lastUpdateTime).coerceAtLeast(0L)
+                            val interpolatedPos = basePositionMs + (timeDelta * speed).toLong()
 
-            // 1. Check local Vault database (song_index first, then songs entity table)
-            var songIndex = dao.getSongIndexByTitleAndArtist(title, artist)
-            var songEntity = if (songIndex == null) dao.checkSongExists(title, artist) else null
-
-            // Secondary lookup: try without common trailing tags if initial match fails
-            if (songIndex == null && songEntity == null) {
-                val simplifiedTitle = title.replace(
-                    Regex("""(?i)\s*[\(\[](?:official\s*(?:video|audio|music\s*video|lyric\s*video)?|feat\.?|ft\.?).*?[\)\]]"""),
-                    ""
-                ).trim()
-                if (simplifiedTitle.isNotEmpty() && simplifiedTitle != title) {
-                    songIndex = dao.getSongIndexByTitleAndArtist(simplifiedTitle, artist)
-                    songEntity = if (songIndex == null) dao.checkSongExists(simplifiedTitle, artist) else null
-                }
-            }
-
-            val matchedVideoId = songIndex?.videoId ?: songEntity?.youtubeVideoId
-            val hasLocalLyrics = songIndex != null || songEntity?.hasLyricsAvailable == true
-
-            if (matchedVideoId != null && hasLocalLyrics) {
-                FileLogger.d(TAG, "Found local lyrics in vault for \"$title\" by \"$artist\" ($matchedVideoId). Displaying overlay.")
-
-                withContext(Dispatchers.Main) {
-                    OverlayLyricsService.start(applicationContext)
-                }
-
-                if (isPlaying) {
-                    // Start high-precision ticker loop to smoothly advance lyrics in real time
-                    while (isActive) {
-                        val timeDelta = (SystemClock.elapsedRealtime() - lastUpdateTime).coerceAtLeast(0L)
-                        val interpolatedPos = basePositionMs + (timeDelta * speed).toLong()
-
+                            OverlayLyricsService.updatePlaybackState(
+                                videoId = matchedVideoId,
+                                positionMs = interpolatedPos,
+                                playing = true,
+                                isExternal = true
+                            )
+                            delay(100L)
+                        }
+                    } else {
                         OverlayLyricsService.updatePlaybackState(
                             videoId = matchedVideoId,
-                            positionMs = interpolatedPos,
-                            playing = true,
+                            positionMs = basePositionMs,
+                            playing = false,
                             isExternal = true
                         )
-                        delay(100L)
                     }
                 } else {
-                    // Paused state: send single update with current position and playing = false
-                    OverlayLyricsService.updatePlaybackState(
-                        videoId = matchedVideoId,
-                        positionMs = basePositionMs,
-                        playing = false,
-                        isExternal = true
-                    )
+                    OverlayLyricsService.updatePlaybackState("", 0L, false, isExternal = true)
                 }
             } else {
-                // Crucial constraint: NO DOWNLOADING. Silently ignore if not found in local vault.
-                FileLogger.d(TAG, "No local lyrics found in vault for \"$title\" by \"$artist\". Silently ignoring event.")
+                FileLogger.d(TAG, "No videoId or local lyrics found for \"$rawTitle\" by \"$rawArtist\".")
                 OverlayLyricsService.updatePlaybackState("", 0L, false, isExternal = true)
             }
         } catch (e: Exception) {
-            FileLogger.e(TAG, "Error checking vault database for \"$rawTitle\" by \"$rawArtist\"", e)
+            FileLogger.e(TAG, "Error checking database for \"$rawTitle\" by \"$rawArtist\"", e)
         }
     }
 }
+
