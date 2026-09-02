@@ -73,12 +73,26 @@ class ExternalPlaybackListenerService : NotificationListenerService() {
             if (!videoId.isNullOrBlank()) {
                 FileLogger.d(TAG, "Intercepted videoId: $videoId from broadcast ($action)")
                 currentInterceptedVideoId = videoId
+
+                // Refresh active media controllers if empty
+                if (activeControllers.isEmpty() && mediaSessionManager != null) {
+                    val component = ComponentName(this@ExternalPlaybackListenerService, ExternalPlaybackListenerService::class.java)
+                    val controllers = try {
+                        mediaSessionManager?.getActiveSessions(component)
+                    } catch (e: Exception) {
+                        null
+                    }
+                    updateActiveSessions(controllers)
+                } else {
+                    for ((controller, _) in activeControllers) {
+                        processMediaUpdate(controller, controller.metadata, controller.playbackState)
+                    }
+                }
+
                 serviceScope.launch {
-                    val hasLyrics = ExternalLyricsSyncManager.ensureLyricsForVideo(applicationContext, videoId)
-                    if (hasLyrics) {
-                        withContext(Dispatchers.Main) {
-                            OverlayLyricsService.start(applicationContext)
-                        }
+                    ExternalLyricsSyncManager.ensureLyricsForVideo(applicationContext, videoId)
+                    withContext(Dispatchers.Main) {
+                        OverlayLyricsService.start(applicationContext)
                     }
                 }
             }
@@ -305,44 +319,54 @@ class ExternalPlaybackListenerService : NotificationListenerService() {
                 rawArtist = currentMetadata?.getString(MediaMetadata.METADATA_KEY_ARTIST)
             }
 
-            // Determine target videoId from intercepted broadcast or local cache
-            val targetVideoId = currentInterceptedVideoId ?: run {
-                if (!rawTitle.isNullOrBlank() && !rawArtist.isNullOrBlank()) {
-                    ExternalLyricsSyncManager.findCachedVideoId(applicationContext, rawTitle, rawArtist)
-                } else null
+            val mediaId = currentMetadata?.getString(MediaMetadata.METADATA_KEY_MEDIA_ID)
+            val mediaUri = currentMetadata?.getString(MediaMetadata.METADATA_KEY_MEDIA_URI)
+            val extractedMediaId = when {
+                !mediaId.isNullOrBlank() && mediaId.length == 11 && !mediaId.contains(" ") -> mediaId
+                !mediaUri.isNullOrBlank() && mediaUri.contains("v=") -> mediaUri.substringAfter("v=").substringBefore("&")
+                else -> null
             }
 
+            // Determine target videoId from intercepted broadcast, extracted media ID, or local/remote search
+            val targetVideoId = currentInterceptedVideoId
+                ?: extractedMediaId
+                ?: run {
+                    if (!rawTitle.isNullOrBlank() && !rawArtist.isNullOrBlank()) {
+                        ExternalLyricsSyncManager.findOrSearchVideoId(applicationContext, rawTitle, rawArtist)
+                    } else null
+                }
+
             if (targetVideoId != null) {
-                val hasLyrics = ExternalLyricsSyncManager.ensureLyricsForVideo(applicationContext, targetVideoId)
-                if (hasLyrics) {
-                    FileLogger.d(TAG, "Lyrics active for videoId: $targetVideoId (isPlaying=$isPlaying, pos=$basePositionMs)")
-                    withContext(Dispatchers.Main) {
-                        OverlayLyricsService.start(applicationContext)
-                    }
+                // Ensure lyrics download pipeline runs asynchronously without blocking position loop
+                serviceScope.launch {
+                    ExternalLyricsSyncManager.ensureLyricsForVideo(applicationContext, targetVideoId)
+                }
 
-                    if (isPlaying) {
-                        while (isActive) {
-                            val timeDelta = (SystemClock.elapsedRealtime() - lastUpdateTime).coerceAtLeast(0L)
-                            val interpolatedPos = basePositionMs + (timeDelta * speed).toLong()
+                FileLogger.d(TAG, "Forwarding external playback state for videoId: $targetVideoId (isPlaying=$isPlaying, pos=$basePositionMs)")
+                withContext(Dispatchers.Main) {
+                    OverlayLyricsService.start(applicationContext)
+                }
 
-                            OverlayLyricsService.updatePlaybackState(
-                                videoId = targetVideoId,
-                                positionMs = interpolatedPos,
-                                playing = true,
-                                isExternal = true
-                            )
-                            delay(100L)
-                        }
-                    } else {
+                if (isPlaying) {
+                    while (isActive) {
+                        val timeDelta = (SystemClock.elapsedRealtime() - lastUpdateTime).coerceAtLeast(0L)
+                        val interpolatedPos = basePositionMs + (timeDelta * speed).toLong()
+
                         OverlayLyricsService.updatePlaybackState(
                             videoId = targetVideoId,
-                            positionMs = basePositionMs,
-                            playing = false,
+                            positionMs = interpolatedPos,
+                            playing = true,
                             isExternal = true
                         )
+                        delay(100L)
                     }
                 } else {
-                    OverlayLyricsService.updatePlaybackState("", 0L, false, isExternal = true)
+                    OverlayLyricsService.updatePlaybackState(
+                        videoId = targetVideoId,
+                        positionMs = basePositionMs,
+                        playing = false,
+                        isExternal = true
+                    )
                 }
             } else if (!rawTitle.isNullOrBlank() && !rawArtist.isNullOrBlank()) {
                 val rawAlbum = currentMetadata?.getString(MediaMetadata.METADATA_KEY_ALBUM) ?: ""

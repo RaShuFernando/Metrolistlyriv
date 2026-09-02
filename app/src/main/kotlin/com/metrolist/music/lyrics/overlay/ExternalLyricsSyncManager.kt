@@ -156,4 +156,24 @@ object ExternalLyricsSyncManager {
             .replace(Regex("""\s+"""), " ")
             .trim()
     }
+
+    /**
+     * Attempts to find a cached videoId from local vault, or searches InnerTube as fallback.
+     */
+    suspend fun findOrSearchVideoId(context: Context, rawTitle: String, rawArtist: String): String? = withContext(Dispatchers.IO) {
+        val cached = findCachedVideoId(context, rawTitle, rawArtist)
+        if (cached != null) return@withContext cached
+
+        try {
+            val query = "${cleanMetadata(rawTitle)} ${cleanMetadata(rawArtist)}"
+            val searchResult = runCatching {
+                YouTube.search(query, YouTube.SearchFilter.FILTER_SONG).getOrNull()
+            }.getOrNull()
+
+            searchResult?.items?.firstOrNull()?.id
+        } catch (e: Exception) {
+            FileLogger.e(TAG, "Error searching videoId for \"$rawTitle\" by \"$rawArtist\"", e)
+            null
+        }
+    }
 }

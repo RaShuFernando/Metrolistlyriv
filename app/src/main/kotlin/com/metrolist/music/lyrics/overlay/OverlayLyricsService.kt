@@ -401,12 +401,14 @@ class OverlayLyricsService : Service() {
                     OverlayLyricsEngine.observeLyricsForTrack(this@OverlayLyricsService, videoId)
                 }
             }.collect { parsedLyrics ->
-                if (currentUiState.value != LyricsUiState.Hidden) {
+                if (currentVideoId.value.isNotBlank()) {
                     if (parsedLyrics != null) {
                         currentUiState.value = LyricsUiState.Success(parsedLyrics)
                     } else {
                         currentUiState.value = LyricsUiState.NotFound
                     }
+                } else {
+                    currentUiState.value = LyricsUiState.Hidden
                 }
             }
         }
