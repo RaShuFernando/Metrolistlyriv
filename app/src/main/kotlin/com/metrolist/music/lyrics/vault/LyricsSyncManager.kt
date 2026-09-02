@@ -176,18 +176,18 @@ object LyricsSyncManager {
                 }
             }
 
-            if (tempFile == null) {
-                FileLogger.e(TAG, "Sync process failed to download SSE stream after $attempt attempts for: ${metadata.title}")
-                return@withContext SyncResult.FAILED
+            val parsedLyricsList = mutableListOf<ParsedLyrics>()
+            if (tempFile != null) {
+                // Step 3: SSE Parsing & Smart Hashing
+                val parser = SseParser()
+                parsedLyricsList.addAll(parser.parse(tempFile))
+            } else {
+                FileLogger.d(TAG, "BetterLyrics SSE download unavailable. Falling back directly to LRCLIB for: ${metadata.title}")
             }
 
-            // Step 3: SSE Parsing & Smart Hashing
-            val parser = SseParser()
-            val parsedLyricsList = parser.parse(tempFile).toMutableList()
-
-            // Fallback to LRCLIB API if not present in parsed SSE stream
+            // Fallback to LRCLIB API if not present in parsed SSE stream or if BetterLyrics returned no lyrics
             val hasLrcLib = parsedLyricsList.any { it.provider.equals("lrclib", ignoreCase = true) }
-            if (!hasLrcLib) {
+            if (!hasLrcLib || parsedLyricsList.isEmpty()) {
                 try {
                     val fallbackLyric = LrcLibFallbackDownloader.fetchLyrics(
                         trackName = metadata.title,
@@ -196,7 +196,14 @@ object LyricsSyncManager {
                         durationSeconds = metadata.durationSeconds
                     )
                     if (fallbackLyric != null) {
-                        parsedLyricsList.add(fallbackLyric)
+                        val existingIndex = parsedLyricsList.indexOfFirst { it.provider.equals("lrclib", ignoreCase = true) }
+                        if (existingIndex >= 0) {
+                            if (fallbackLyric.rank < parsedLyricsList[existingIndex].rank) {
+                                parsedLyricsList[existingIndex] = fallbackLyric
+                            }
+                        } else {
+                            parsedLyricsList.add(fallbackLyric)
+                        }
                         FileLogger.d(TAG, "Successfully fetched and appended fallback LRCLIB lyrics for: ${metadata.title}")
                     }
                 } catch (e: Exception) {
@@ -212,8 +219,8 @@ object LyricsSyncManager {
 
             // 3a. Empty Check: Discard temp .sse, increment retry_count, update last_checked, wait 30 days
             if (parsedLyricsList.isEmpty()) {
-                FileLogger.d(TAG, "Parsed lyrics list is empty for: ${metadata.title}. Discarding temp SSE, physically creating metadata.json, and incrementing retry_count.")
-                tempFile.delete()
+                FileLogger.d(TAG, "Parsed lyrics list is empty for: ${metadata.title}. Discarding temp SSE if present, physically creating metadata.json, and incrementing retry_count.")
+                tempFile?.delete()
                 val nextRetry = currentRetryCount + 1
 
                 vaultManager.writeMetadataJsonWithRanking(
@@ -258,7 +265,7 @@ object LyricsSyncManager {
 
             if (localContentHash != null && localContentHash == newContentHash && !isManualForce) {
                 FileLogger.d(TAG, "Lyrics content hash unchanged for: ${metadata.title}. Discarding temp SSE and incrementing retry_count.")
-                tempFile.delete()
+                tempFile?.delete()
                 val nextRetry = currentRetryCount + 1
 
                 vaultManager.updateMetadataRetryAndCheck(
@@ -300,14 +307,16 @@ object LyricsSyncManager {
                 lyricFile.writeText(lyric.lyricsText)
             }
 
-            // 4c. Save raw .sse file with version suffix and FIFO queue (max 4 .sse files)
-            vaultManager.saveRawSseWithFifoRotation(
-                tempFile = tempFile,
-                artist = metadata.artist,
-                album = metadata.album,
-                song = metadata.title,
-                maxFiles = 4
-            )
+            // 4c. Save raw .sse file with version suffix and FIFO queue (max 4 .sse files) if tempFile was downloaded
+            if (tempFile != null) {
+                vaultManager.saveRawSseWithFifoRotation(
+                    tempFile = tempFile,
+                    artist = metadata.artist,
+                    album = metadata.album,
+                    song = metadata.title,
+                    maxFiles = 4
+                )
+            }
 
             // 4d. Determine if all 4 formats (.lrc, .qrc, .ttml, .elrc) are present
             val presentFormats = parsedLyricsList.map { it.format.lowercase() }.toSet()
