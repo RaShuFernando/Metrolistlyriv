@@ -119,6 +119,74 @@ object ExternalLyricsSyncManager {
     }
 
     /**
+     * Force checks and re-downloads fresh lyrics for [videoId] regardless of local cache.
+     */
+    suspend fun forceSyncLyricsForVideo(context: Context, videoId: String): Pair<LyricsSyncManager.SyncResult, String> = withContext(Dispatchers.IO) {
+        if (videoId.isBlank()) return@withContext Pair(LyricsSyncManager.SyncResult.FAILED, "")
+
+        try {
+            // 1. Fetch metadata via InnerTube
+            FileLogger.d(TAG, "Force sync: Fetching track metadata via InnerTube for videoId: $videoId")
+            val nextResult = runCatching {
+                YouTube.next(WatchEndpoint(videoId = videoId)).getOrNull()
+            }.getOrNull()
+
+            val songItem = nextResult?.items?.firstOrNull { it.id == videoId }
+                ?: nextResult?.items?.firstOrNull()
+
+            var title = songItem?.title ?: nextResult?.title ?: ""
+            var artist = songItem?.artists?.joinToString(", ") { it.name } ?: ""
+            var album = songItem?.album?.name ?: ""
+            var durationSeconds = songItem?.duration ?: 0
+            var thumbnail = songItem?.thumbnail ?: ""
+
+            // Fallback to player endpoint if next didn't resolve title/artist
+            if (title.isBlank() || artist.isBlank()) {
+                val playerResult = runCatching {
+                    YouTube.player(videoId = videoId, client = YouTubeClient.WEB_REMIX).getOrNull()
+                }.getOrNull()
+
+                val details = playerResult?.videoDetails
+                if (details != null) {
+                    if (title.isBlank()) title = details.title ?: ""
+                    if (artist.isBlank()) artist = details.author ?: ""
+                    if (durationSeconds <= 0) durationSeconds = details.lengthSeconds.toIntOrNull() ?: 0
+                    if (thumbnail.isBlank()) {
+                        thumbnail = details.thumbnail.thumbnails.lastOrNull()?.url ?: ""
+                    }
+                }
+            }
+
+            val finalTitle = title.ifBlank { "Unknown Track" }
+            val finalArtist = artist.ifBlank { "Unknown Artist" }
+            val finalAlbum = album.ifBlank { finalTitle }
+
+            // 2. Construct VaultMetadata and invoke force sync
+            val vaultMetadata = VaultMetadata(
+                videoId = videoId,
+                title = finalTitle,
+                artist = finalArtist,
+                album = finalAlbum,
+                durationSeconds = durationSeconds,
+                albumArtUrl = thumbnail,
+                composer = "",
+                description = null,
+                mediaId = videoId,
+                artistBrowseId = songItem?.artists?.firstOrNull()?.id,
+                albumBrowseId = songItem?.album?.id
+            )
+
+            val syncResult = LyricsSyncManager.syncLyrics(context, vaultMetadata, isManualForce = true)
+            FileLogger.d(TAG, "Force lyrics sync result for $videoId: $syncResult")
+
+            Pair(syncResult, finalTitle)
+        } catch (e: Exception) {
+            FileLogger.e(TAG, "Error force syncing lyrics for videoId $videoId", e)
+            Pair(LyricsSyncManager.SyncResult.FAILED, "")
+        }
+    }
+
+    /**
      * Attempts to find a cached videoId from local vault by title and artist.
      */
     suspend fun findCachedVideoId(context: Context, rawTitle: String, rawArtist: String): String? = withContext(Dispatchers.IO) {
